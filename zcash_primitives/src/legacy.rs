@@ -123,6 +123,20 @@ impl TransparentAddress {
     }
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::*;
+
+    use super::TransparentAddress;
+
+    prop_compose! {
+        pub fn arb_transparent_addr()(v in proptest::array::uniform20(any::<u8>())) -> TransparentAddress {
+            // FIXME: Not a valid address. 
+            TransparentAddress::PublicKey(v)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{OpCode, Script, TransparentAddress};

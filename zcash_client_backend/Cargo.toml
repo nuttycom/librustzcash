@@ -22,6 +22,8 @@ jubjub = "0.5.1"
 protobuf = "2.15"
 subtle = "2"
 zcash_primitives = { version = "0.4", path = "../zcash_primitives" }
+proptest = { version = "0.10.1", optional = true }
+percent-encoding = "2.1.0"
 
 [build-dependencies]
 protobuf-codegen-pure = "2.15"
@@ -29,6 +31,9 @@ protobuf-codegen-pure = "2.15"
 [dev-dependencies]
 rand_core = "0.5"
 rand_xorshift = "0.2"
+
+[features]
+test-dependencies = ["proptest", "zcash_primitives/test-dependencies"]
 
 [badges]
 maintenance = { status = "actively-developed" }
