@@ -4,7 +4,8 @@ use core::fmt::Debug;
 use percent_encoding::{
     percent_encode,
     utf8_percent_encode,
-    NON_ALPHANUMERIC
+    AsciiSet,
+    CONTROLS,
 };
 
 use zcash_primitives::{
@@ -18,6 +19,29 @@ use zcash_primitives::{
 use crate::{
     encoding::{encode_payment_address, encode_transparent_address}
 };
+
+//       unreserved      = ALPHA / DIGIT / "-" / "." / "_" / "~"
+//       allowed-delims  = "!" / "$" / "'" / "(" / ")" / "*" / "+" / "," / ";"
+//       qchar           = unreserved / pct-encoded / allowed-delims / ":" / "@"
+pub const QCHAR_ENCODE: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'&')
+    .add(b'\\')
+    .add(b'/')
+    .add(b'<')
+    .add(b'=')
+    .add(b'>')
+    .add(b'?')
+    .add(b'[')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
 
 #[derive(Debug)]
 pub enum Address {
@@ -107,7 +131,7 @@ impl Zip321Request {
                 "{}{}={}",
                 "memo",
                 param_index(idx),
-                percent_encode(value0, NON_ALPHANUMERIC)
+                percent_encode(value0, QCHAR_ENCODE)
             )
         };
 
@@ -116,7 +140,7 @@ impl Zip321Request {
                 "{}{}={}",
                 label,
                 param_index(idx),
-                utf8_percent_encode(value, NON_ALPHANUMERIC)
+                utf8_percent_encode(value, QCHAR_ENCODE)
             )
         };
 
