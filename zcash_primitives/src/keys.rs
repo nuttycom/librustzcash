@@ -186,11 +186,8 @@ pub mod testing {
     use proptest::prelude::*;
 
     use crate::{
-        zip32::{
-            ExtendedSpendingKey,
-            ExtendedFullViewingKey,
-        },
         primitives::PaymentAddress,
+        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
     prop_compose! {
@@ -206,7 +203,6 @@ pub mod testing {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
