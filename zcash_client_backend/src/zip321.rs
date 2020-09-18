@@ -1,14 +1,11 @@
 use core::fmt::Debug;
-use std::convert::TryFrom;
 use std::fmt;
 
 use nom::{
-    branch::alt,
     bytes::complete::{tag, take_until},
-    character::complete::{alpha1, alphanumeric0, digit0, digit1, one_of, char},
-    combinator::{map, map_res, opt, recognize},
-    error::ParseError,
-    multi::{many0, separated_list},
+    character::complete::{alpha1, char, digit0, digit1, one_of},
+    combinator::{map_res, opt, recognize},
+    multi::separated_list,
     sequence::{preceded, separated_pair, tuple},
     AsChar, IResult, InputTakeAtPosition,
 };
@@ -16,8 +13,7 @@ use nom::{
 use percent_encoding::{percent_encode, utf8_percent_encode, AsciiSet, CONTROLS};
 
 use zcash_primitives::{
-    consensus, legacy, legacy::TransparentAddress, primitives,
-    transaction::components::amount::COIN, 
+    consensus, legacy, primitives, transaction::components::amount::COIN,
     transaction::components::Amount,
 };
 
@@ -81,6 +77,7 @@ impl PartialEq for Memo {
         res
     }
 }
+
 pub enum AddrParseError {
     TAddrError(bs58::decode::Error),
     SAddrError(bech32::Error),
@@ -100,7 +97,7 @@ pub struct Zip321Request {
 }
 
 impl Zip321Request {
-    pub fn to_uri<P: consensus::Parameters + Clone>(&self, params: &P) -> Option<String> {
+    pub fn to_uri<P: consensus::Parameters>(&self, params: &P) -> Option<String> {
         fn param_index(idx: Option<usize>) -> String {
             match idx {
                 Some(i) if i > 0 => format!(".{}", i),
@@ -207,52 +204,62 @@ impl Zip321Request {
         }
     }
 
-    pub fn from_uri<'a, P: consensus::Parameters + Clone>(
+    pub fn from_uri<'a, P: consensus::Parameters>(
         params: &P,
         uri: &'a str,
     ) -> IResult<&'a str, Zip321Request> {
         // For purposes of parsing
         #[derive(Debug)]
-        enum Param<'a> {
+        enum Param {
             Addr(Address),
             Amount(Amount),
-            Message(&'a str),
+            Message(String),
             Memo(Memo),
-            Req(&'a str, &'a str),
-            Other(&'a str, &'a str),
+            Other(String, String),
         };
 
         #[derive(Debug)]
-        struct IndexedParam<'a> {
-            param: Param<'a>,
+        struct IndexedParam {
+            param: Param,
             payment_index: usize,
         }
 
-        let parse_address = |input: &str| {
-            let t_res = decode_transparent_address(
-                &params.b58_pubkey_address_prefix(),
-                &params.b58_script_address_prefix(),
-                input,
-            )
-            .map(|t| t.map(Address::TransparentAddress))
-            .map_err(AddrParseError::TAddrError);
+        fn parse_address<P: consensus::Parameters>(
+            params: &P,
+            addr_str: &str,
+        ) -> Result<Option<Address>, AddrParseError> {
+            if addr_str == "" {
+                Ok(None)
+            } else {
+                let t_res = decode_transparent_address(
+                    &params.b58_pubkey_address_prefix(),
+                    &params.b58_script_address_prefix(),
+                    addr_str,
+                )
+                .map(|t| t.map(Address::TransparentAddress))
+                .map_err(AddrParseError::TAddrError);
 
-            let s_res = decode_payment_address(&params.hrp_sapling_payment_address(), input)
-                .map(|s| s.map(Address::SaplingAddress))
-                .map_err(AddrParseError::SAddrError);
+                let s_res = decode_payment_address(&params.hrp_sapling_payment_address(), addr_str)
+                    .map(|s| s.map(Address::SaplingAddress))
+                    .map_err(AddrParseError::SAddrError);
 
-            match t_res {
-                Err(_) | Ok(None) => s_res,
-                t_addr => t_addr,
+                match t_res {
+                    Err(_) | Ok(None) => s_res,
+                    t_addr => t_addr,
+                }
             }
-        };
+        }
 
-        let lead_addr = |input: &'a str| -> IResult<&'a str, Option<Address>> {
-            let (input, _) = tag("zcash:")(input)?;
-            map_res(take_until("?"), parse_address)(input)
-        };
+        fn lead_addr<'a, P: consensus::Parameters>(
+            params: &'a P,
+        ) -> impl Fn(&str) -> IResult<&str, Option<Address>> + 'a {
+            move |input: &str| {
+                let (input, _) = tag("zcash:")(input)?;
+                map_res(take_until("?"), |i| parse_address(params, i))(input)
+            }
+        }
 
-        fn alphanum_or<'a>(allowed: String) -> impl (Fn(&'a str) -> IResult<&'a str, &'a str>) { 
+        fn alphanum_or(allowed: String) -> impl (Fn(&str) -> IResult<&str, &str>) {
             move |input| {
                 input.split_at_position_complete(|item| {
                     let c = item.as_char();
@@ -269,13 +276,15 @@ impl Zip321Request {
             alphanum_or("+-".to_string())(input)
         }
 
-
         fn indexed_name<'a>(input: &'a str) -> IResult<&'a str, (&'a str, Option<&'a str>)> {
             let paramname = recognize(tuple((alpha1, namechars)));
 
             tuple((
                 paramname,
-                opt(preceded(char('.'), recognize(tuple((one_of("123456789"), digit0)))))
+                opt(preceded(
+                    char('.'),
+                    recognize(tuple((one_of("123456789"), digit0))),
+                )),
             ))(input)
         }
 
@@ -283,54 +292,85 @@ impl Zip321Request {
             map_res(
                 separated_pair(digit1, char('.'), digit0),
                 |(whole_s, decimal_s): (&str, &str)| {
-                    let coins: i64 = whole_s.to_string().parse::<i64>().map_err(|e| e.to_string())?;
-                    let zats: i64 = decimal_s.to_string().parse::<i64>().map_err(|e| e.to_string())?;
+                    let coins: i64 = whole_s
+                        .to_string()
+                        .parse::<i64>()
+                        .map_err(|e| e.to_string())?;
+                    let zats: i64 = decimal_s
+                        .to_string()
+                        .parse::<i64>()
+                        .map_err(|e| e.to_string())?;
                     let amt = coins * COIN + zats;
 
                     Amount::from_i64(amt).map_err(|_| format!("Not a valid zat amount: {}", amt))
-                }
+                },
             )(input)
         }
 
-        fn to_indexed_param<'a, P: consensus::Parameters>(params: &P) ->
-            impl Fn(((&'a str, Option<&'a str>), &'a str)) -> Result<IndexedParam<'a>, String> {
+        fn to_indexed_param<'a, P: consensus::Parameters>(
+            params: &'a P,
+            ((name, iopt), value): ((&str, Option<&str>), &str),
+        ) -> Result<IndexedParam, String> {
+            let param = match name {
+                "address" => parse_address(params, value)
+                    .map_err(|e| match e {
+                        AddrParseError::TAddrError(_) => format!(
+                            "Could not interpret {} as a valid transparent address.",
+                            value
+                        ),
+                        AddrParseError::SAddrError(_) => {
+                            format!("Could not interpret {} as a valid sapling address.", value)
+                        }
+                    })
+                    .and_then(|addr_opt| {
+                        addr_opt.map(Param::Addr).ok_or(format!(
+                            "Could not interpret {} as a valid Zcash address.",
+                            value
+                        ))
+                    }),
+                "amount" => amount(value)
+                    .map(|(_, a)| Param::Amount(a))
+                    .map_err(|e| e.to_string()),
+                //"label" =>
+                //"memo" =>
+                //"message" =>
+                other if other.starts_with("req-") => {
+                    Err(format!("Required parameter {} not recognized", other))
+                }
+                other => Ok(Param::Other(other.to_string(), value.to_string())),
+            }?;
 
-            |((name, iopt), value)| {
-                let param = match name {
-                    //"address" =>
-                    "amount" => map(amount, |a| Param::Amount(a))(value).map(|a| a.1).map_err(|e| e.to_string()),
-                    //"label" =>
-                    //"memo" =>
-                    //"message" =>
-                    other if other.starts_with("req-") =>
-                        Err(format!("Required parameter {} not recognized", other)),
-                    other =>
-                        Ok(Param::Other(other, value))
-                }?;
+            let payment_index = match iopt {
+                Some(istr) => istr
+                    .to_string()
+                    .parse::<usize>()
+                    .map(Some)
+                    .map_err(|e| e.to_string()),
+                None => Ok(None),
+            }?;
 
-                let payment_index = match iopt {
-                    Some(istr) => istr.to_string().parse::<usize>().map(Some).map_err(|e| e.to_string()),
-                    None => Ok(None)
-                }?;
+            Ok(IndexedParam {
+                param,
+                payment_index: payment_index.unwrap_or(0),
+            })
+        };
 
-                Ok(IndexedParam { param, payment_index: payment_index.unwrap_or(0) })
-            }
-        }
-
-        fn zcashparam<'a, P: consensus::Parameters + Clone>(params: &P) ->
-            impl Fn(&'a str) -> IResult<&str, IndexedParam<'a>>
-        {
-            let params0 = params.clone();
-            move |input: &str| {
+        fn zcashparam<'a, P: consensus::Parameters>(
+            params: &'a P,
+        ) -> impl Fn(&str) -> IResult<&str, IndexedParam> + 'a {
+            move |input| {
                 map_res(
                     separated_pair(indexed_name, char('='), recognize(qchars)),
-                    to_indexed_param(&params0)
+                    move |r| to_indexed_param(params, r),
                 )(input)
             }
         }
 
-        let (rest, addr) = lead_addr(uri)?;
-        let primary_addr_param = addr.map(|a| IndexedParam { param: Param::Addr(a), payment_index: 0 });
+        let (rest, addr) = lead_addr(&params.clone())(uri)?;
+        let primary_addr_param = addr.map(|a| IndexedParam {
+            param: Param::Addr(a),
+            payment_index: 0,
+        });
         println!("{:?}: {:?}", rest, primary_addr_param);
 
         let (rest, _) = char('?')(rest)?;
