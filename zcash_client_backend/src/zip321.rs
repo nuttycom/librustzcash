@@ -5,10 +5,10 @@ use std::fmt;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until},
-    character::complete::{alpha1, alphanumeric0, digit0, one_of},
+    character::complete::{alpha1, alphanumeric0, digit0, digit1, one_of, char},
     combinator::{map, map_res, opt, recognize},
     error::ParseError,
-    multi::many0,
+    multi::{many0, separated_list},
     sequence::{preceded, separated_pair, tuple},
     AsChar, IResult, InputTakeAtPosition,
 };
@@ -17,7 +17,8 @@ use percent_encoding::{percent_encode, utf8_percent_encode, AsciiSet, CONTROLS};
 
 use zcash_primitives::{
     consensus, legacy, legacy::TransparentAddress, primitives,
-    transaction::components::amount::COIN, transaction::components::Amount,
+    transaction::components::amount::COIN, 
+    transaction::components::Amount,
 };
 
 use crate::encoding::{
@@ -58,49 +59,39 @@ pub enum Address {
     SaplingAddress(primitives::PaymentAddress),
 }
 
+pub struct Memo([u8; 512]);
+
+impl Debug for Memo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        f.debug_struct("Zip321Payment")
+            .field("memo", &format!("{:?}...", &self.0[0..17]))
+            .finish()
+    }
+}
+
+impl PartialEq for Memo {
+    fn eq(&self, other: &Self) -> bool {
+        let mut res = true;
+        for i in 0..512 {
+            if self.0[i] != other.0[i] {
+                res = false;
+                break;
+            }
+        }
+        res
+    }
+}
 pub enum AddrParseError {
     TAddrError(bs58::decode::Error),
     SAddrError(bech32::Error),
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Zip321Payment {
     recipient_address: Address,
     amount: Amount,
-    memo: Option<[u8; 512]>,
+    memo: Option<Memo>,
     message: Option<String>,
-}
-
-impl Debug for Zip321Payment {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        f.debug_struct("Zip321Payment")
-            .field("recipient_address", &self.recipient_address)
-            .field("amount", &self.amount)
-            .field("memo", &self.memo.map(|b| format!("{:?}...", &b[0..17])))
-            .field("message", &self.message)
-            .finish()
-    }
-}
-
-impl PartialEq for Zip321Payment {
-    fn eq(&self, other: &Self) -> bool {
-        self.recipient_address == other.recipient_address
-            && self.amount == other.amount
-            && match (self.memo, other.memo) {
-                (None, None) => true,
-                (Some(m), Some(m0)) => {
-                    let mut res = true;
-                    for i in 0..512 {
-                        if m[i] != m0[i] {
-                            res = false;
-                            break;
-                        }
-                    }
-                    res
-                }
-                _otherwise => false,
-            }
-            && self.message == other.message
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -109,7 +100,7 @@ pub struct Zip321Request {
 }
 
 impl Zip321Request {
-    pub fn to_uri<P: consensus::Parameters>(&self, params: &P) -> Option<String> {
+    pub fn to_uri<P: consensus::Parameters + Clone>(&self, params: &P) -> Option<String> {
         fn param_index(idx: Option<usize>) -> String {
             match idx {
                 Some(i) if i > 0 => format!(".{}", i),
@@ -147,18 +138,18 @@ impl Zip321Request {
             }
         };
 
-        let memo_param = |value: &[u8], idx: Option<usize>| {
+        let memo_param = |value: &Memo, idx: Option<usize>| {
             // strip trailing zero bytes.
             let value0: &[u8] = {
                 let mut last_nonzero = -1;
-                for i in (0..(value.len())).rev() {
-                    if value[i] != 0x0 {
+                for i in (0..(value.0.len())).rev() {
+                    if value.0[i] != 0x0 {
                         last_nonzero = i as i64;
                         break;
                     }
                 }
 
-                &value[..((last_nonzero + 1) as usize)]
+                &value.0[..((last_nonzero + 1) as usize)]
             };
 
             format!(
@@ -199,7 +190,7 @@ impl Zip321Request {
                     params.push(amt_param);
                 }
 
-                if let Some(m_param) = payment.memo.map(|m| memo_param(&m, Some(i))) {
+                if let Some(m_param) = payment.memo.as_ref().map(|m| memo_param(&m, Some(i))) {
                     params.push(m_param);
                 }
 
@@ -216,20 +207,22 @@ impl Zip321Request {
         }
     }
 
-    pub fn from_uri<'a, P: consensus::Parameters>(
+    pub fn from_uri<'a, P: consensus::Parameters + Clone>(
         params: &P,
         uri: &'a str,
     ) -> IResult<&'a str, Zip321Request> {
         // For purposes of parsing
+        #[derive(Debug)]
         enum Param<'a> {
             Addr(Address),
             Amount(Amount),
             Message(&'a str),
-            Memo([u8; 512]),
+            Memo(Memo),
             Req(&'a str, &'a str),
             Other(&'a str, &'a str),
         };
 
+        #[derive(Debug)]
         struct IndexedParam<'a> {
             param: Param<'a>,
             payment_index: usize,
@@ -277,22 +270,35 @@ impl Zip321Request {
         }
 
 
-        fn param<'a>(input: &'a str) -> IResult<&'a str, (&'a str, Option<&'a str>)> {
+        fn indexed_name<'a>(input: &'a str) -> IResult<&'a str, (&'a str, Option<&'a str>)> {
             let paramname = recognize(tuple((alpha1, namechars)));
 
             tuple((
                 paramname,
-                opt(preceded(tag("."), recognize(tuple((one_of("123456789"), digit0)))))
+                opt(preceded(char('.'), recognize(tuple((one_of("123456789"), digit0)))))
             ))(input)
         }
 
+        fn amount<'a>(input: &'a str) -> IResult<&'a str, Amount> {
+            map_res(
+                separated_pair(digit1, char('.'), digit0),
+                |(whole_s, decimal_s): (&str, &str)| {
+                    let coins: i64 = whole_s.to_string().parse::<i64>().map_err(|e| e.to_string())?;
+                    let zats: i64 = decimal_s.to_string().parse::<i64>().map_err(|e| e.to_string())?;
+                    let amt = coins * COIN + zats;
+
+                    Amount::from_i64(amt).map_err(|_| format!("Not a valid zat amount: {}", amt))
+                }
+            )(input)
+        }
+
         fn to_indexed_param<'a, P: consensus::Parameters>(params: &P) ->
-            impl Fn(((&'a str, Option<&'a str>), &'a str)) -> Result<(Param<'a>, Option<usize>), String> {
+            impl Fn(((&'a str, Option<&'a str>), &'a str)) -> Result<IndexedParam<'a>, String> {
 
             |((name, iopt), value)| {
                 let param = match name {
                     //"address" =>
-                    //"amount" =>
+                    "amount" => map(amount, |a| Param::Amount(a))(value).map(|a| a.1).map_err(|e| e.to_string()),
                     //"label" =>
                     //"memo" =>
                     //"message" =>
@@ -302,29 +308,34 @@ impl Zip321Request {
                         Ok(Param::Other(other, value))
                 }?;
 
-                let index = match iopt {
+                let payment_index = match iopt {
                     Some(istr) => istr.to_string().parse::<usize>().map(Some).map_err(|e| e.to_string()),
                     None => Ok(None)
                 }?;
 
-                Ok((param, index))
+                Ok(IndexedParam { param, payment_index: payment_index.unwrap_or(0) })
             }
         }
 
-        fn zcashparams<'a, P: consensus::Parameters>(params: P) ->
-            impl Fn(&'a str) -> IResult<&str, (Param<'a>, Option<usize>)>
+        fn zcashparam<'a, P: consensus::Parameters + Clone>(params: &P) ->
+            impl Fn(&'a str) -> IResult<&str, IndexedParam<'a>>
         {
+            let params0 = params.clone();
             move |input: &str| {
                 map_res(
-                    separated_pair(param, tag("="), recognize(qchars)),
-                    to_indexed_param(&params)
+                    separated_pair(indexed_name, char('='), recognize(qchars)),
+                    to_indexed_param(&params0)
                 )(input)
             }
         }
 
         let (rest, addr) = lead_addr(uri)?;
+        let primary_addr_param = addr.map(|a| IndexedParam { param: Param::Addr(a), payment_index: 0 });
+        println!("{:?}: {:?}", rest, primary_addr_param);
 
-        println!("{:?}: {:?}", rest, addr);
+        let (rest, _) = char('?')(rest)?;
+        let (rest, xs) = separated_list(char('&'), zcashparam(params))(rest)?;
+        println!("{:?}: {:?}", rest, xs);
 
         Ok((uri, Zip321Request { payments: vec![] }))
     }
