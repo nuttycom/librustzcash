@@ -1,3 +1,4 @@
+#[cfg(feature = "zfuture")]
 use std::convert::TryInto;
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
@@ -5,10 +6,11 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::GroupEncoding;
 
+use crate::{consensus, legacy::Script};
+
+#[cfg(feature = "zfuture")]
 use crate::{
-    consensus,
     extensions::transparent::Precondition,
-    legacy::Script,
     serialize::{CompactSize, Vector},
 };
 
@@ -25,9 +27,13 @@ const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
+
+#[cfg(feature = "zfuture")]
 const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash_TzeInsHash";
+#[cfg(feature = "zfuture")]
 const ZCASH_TZE_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashTzeOutsHash";
 
+#[cfg(feature = "zfuture")]
 const ZCASH_TZE_SIGNED_INPUT_TAG: &[u8; 1] = &[0x00];
 const ZCASH_TRANSPARENT_SIGNED_INPUT_TAG: &[u8; 1] = &[0x01];
 
@@ -166,6 +172,7 @@ fn shielded_outputs_hash(tx: &TransactionData) -> Blake2bHash {
         .hash(&data)
 }
 
+#[cfg(feature = "zfuture")]
 fn tze_inputs_hash(tx: &TransactionData) -> Blake2bHash {
     let mut data = vec![];
     for tzein in &tx.tze_inputs {
@@ -177,6 +184,7 @@ fn tze_inputs_hash(tx: &TransactionData) -> Blake2bHash {
         .hash(&data)
 }
 
+#[cfg(feature = "zfuture")]
 fn tze_outputs_hash(tx: &TransactionData) -> Blake2bHash {
     let mut data = vec![];
     for tzeout in &tx.tze_outputs {
@@ -195,6 +203,7 @@ pub enum SignableInput<'a> {
         script_code: &'a Script,
         value: Amount,
     },
+    #[cfg(feature = "zfuture")]
     Tze {
         index: usize,
         precondition: &'a Precondition,
@@ -211,6 +220,7 @@ impl<'a> SignableInput<'a> {
         }
     }
 
+    #[cfg(feature = "zfuture")]
     pub fn tze(index: usize, precondition: &'a Precondition, value: Amount) -> Self {
         SignableInput::Tze {
             index,
@@ -266,12 +276,20 @@ pub fn signature_hash_data<'a>(
             } else {
                 h.update(&[0; 32]);
             };
+            #[cfg(feature = "zfuture")]
             if sigversion == SigHashVersion::ZFuture {
                 update_hash!(h, !tx.tze_inputs.is_empty(), tze_inputs_hash(tx));
                 update_hash!(h, !tx.tze_outputs.is_empty(), tze_outputs_hash(tx));
             }
             update_hash!(h, !tx.joinsplits.is_empty(), joinsplits_hash(tx));
-            if sigversion == SigHashVersion::Sapling || sigversion == SigHashVersion::ZFuture {
+            if sigversion == SigHashVersion::Sapling || {
+                #[cfg(feature = "zfuture")]
+                {
+                    sigversion == SigHashVersion::ZFuture
+                }
+                #[cfg(not(feature = "zfuture"))]
+                false
+            } {
                 update_hash!(h, !tx.shielded_spends.is_empty(), shielded_spends_hash(tx));
                 update_hash!(
                     h,
@@ -309,6 +327,7 @@ pub fn signature_hash_data<'a>(
                     h.update(&data);
                 }
 
+                #[cfg(feature = "zfuture")]
                 SignableInput::Tze {
                     index,
                     precondition,
@@ -327,6 +346,7 @@ pub fn signature_hash_data<'a>(
                     h.update(&data);
                 }
 
+                #[cfg(feature = "zfuture")]
                 SignableInput::Tze { .. } => {
                     panic!("A request has been made to sign a TZE input, but the signature hash version is not ZFuture");
                 }

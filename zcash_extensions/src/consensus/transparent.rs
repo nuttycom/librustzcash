@@ -116,6 +116,7 @@ impl Epoch for EpochVTest {
 pub fn epoch_for_branch(branch_id: BranchId) -> Option<Box<dyn Epoch<Error = String>>> {
     // Map from consensus branch IDs to epochs.
     match branch_id {
+        #[cfg(feature = "zfuture")]
         BranchId::ZFuture => Some(Box::new(EpochVTest)),
         _ => None,
     }
