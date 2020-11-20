@@ -7,9 +7,9 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::try_sapling_compact_note_decryption,
+    primitives::SaplingIvk,
     sapling::Node,
     transaction::TxId,
-    zip32::ExtendedFullViewingKey,
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
@@ -26,7 +26,7 @@ fn scan_output<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
-    ivks: &[jubjub::Fr],
+    ivks: &[SaplingIvk],
     spent_from_accounts: &HashSet<usize>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -52,7 +52,7 @@ fn scan_output<P: consensus::Parameters>(
 
     for (account, ivk) in ivks.iter().enumerate() {
         let (note, to) =
-            match try_sapling_compact_note_decryption(params, height, ivk, &epk, &cmu, &ct) {
+            match try_sapling_compact_note_decryption(params, height, &ivk.0, &epk, &cmu, &ct) {
                 Some(ret) => ret,
                 None => continue,
             };
@@ -89,13 +89,12 @@ fn scan_output<P: consensus::Parameters>(
 pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
-    extfvks: &[ExtendedFullViewingKey],
+    ivks: &[SaplingIvk],
     nullifiers: &[(&[u8], usize)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx> {
     let mut wtxs: Vec<WalletTx> = vec![];
-    let ivks: Vec<_> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
     let block_height = block.height();
 
     for tx in block.vtx.into_iter() {
@@ -159,7 +158,7 @@ pub fn scan_block<P: consensus::Parameters>(
                     params,
                     block_height,
                     to_scan,
-                    &ivks,
+                    ivks,
                     &spent_from_accounts,
                     tree,
                     existing_witnesses,

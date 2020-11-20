@@ -48,7 +48,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
             let ((note, to, memo), outgoing) = match try_sapling_note_decryption(
                 params,
                 height,
-                ivk,
+                &ivk.0,
                 &output.ephemeral_key,
                 &output.cmu,
                 &output.enc_ciphertext,
