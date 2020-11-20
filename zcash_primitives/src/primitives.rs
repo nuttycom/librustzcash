@@ -52,8 +52,6 @@ pub struct ViewingKey {
     pub nk: jubjub::SubgroupPoint,
 }
 
-pub struct SaplingIvk(pub jubjub::Fr);
-
 impl ViewingKey {
     pub fn rk(&self, ar: jubjub::Fr) -> jubjub::SubgroupPoint {
         self.ak + constants::SPENDING_KEY_GENERATOR * ar
@@ -77,10 +75,14 @@ impl ViewingKey {
 
         SaplingIvk(jubjub::Fr::from_repr(h).expect("should be a valid scalar"))
     }
+}
 
+pub struct SaplingIvk(pub jubjub::Fr);
+
+impl SaplingIvk {
     pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
         diversifier.g_d().and_then(|g_d| {
-            let pk_d = g_d * self.ivk().0;
+            let pk_d = g_d * self.0;
 
             PaymentAddress::from_parts(diversifier, pk_d)
         })
