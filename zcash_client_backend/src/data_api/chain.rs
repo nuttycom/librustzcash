@@ -3,7 +3,9 @@ use std::fmt::Debug;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
+    primitives::SaplingIvk,
     merkle_tree::CommitmentTree,
+    zip32::ExtendedFullViewingKey,
 };
 
 use crate::{
@@ -150,7 +152,7 @@ where
     })?;
 
     // Fetch the ExtendedFullViewingKeys we are tracking
-    let extfvks = data.get_extended_full_viewing_keys(params)?;
+    let extfvks: Vec<ExtendedFullViewingKey> = data.get_extended_full_viewing_keys(params)?;
 
     // Get the most recent CommitmentTree
     let mut tree = data
@@ -182,10 +184,12 @@ where
                 .map(|(nf, acc)| (&nf[..], acc.0 as usize))
                 .collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
+            let ivks: Vec<SaplingIvk> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
+
             scan_block(
                 params,
                 block,
-                &extfvks[..],
+                &ivks[..],
                 &nf_refs,
                 &mut tree,
                 &mut witness_refs[..],
