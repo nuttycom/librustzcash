@@ -433,7 +433,7 @@ impl ExtendedFullViewingKey {
             Ok(ret) => ret,
             Err(()) => return Err(()),
         };
-        match self.fvk.vk.to_payment_address(d_j) {
+        match self.fvk.vk.ivk().to_payment_address(d_j) {
             Some(addr) => Ok((j, addr)),
             None => Err(()),
         }

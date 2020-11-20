@@ -81,7 +81,7 @@ impl SaplingProvingContext {
         let viewing_key = proof_generation_key.to_viewing_key();
 
         // Construct the payment address with the viewing key / diversifier
-        let payment_address = viewing_key.to_payment_address(diversifier).ok_or(())?;
+        let payment_address = viewing_key.ivk().to_payment_address(diversifier).ok_or(())?;
 
         // This is the result of the re-randomization, we compute it for the caller
         let rk =

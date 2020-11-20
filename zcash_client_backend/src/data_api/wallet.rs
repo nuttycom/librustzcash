@@ -200,6 +200,7 @@ where
         let from = extfvk
             .fvk
             .vk
+            .ivk()
             .to_payment_address(selected.diversifier)
             .unwrap(); //JUBJUB would have to unexpectedly be the zero point for this to be None
 
