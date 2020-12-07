@@ -553,7 +553,7 @@ fn test_input_circuit_with_bls12_381() {
                 Diversifier(d)
             };
 
-            if let Some(p) = viewing_key.to_payment_address(diversifier) {
+            if let Some(p) = viewing_key.ivk().to_payment_address(diversifier) {
                 payment_address = p;
                 break;
             }
@@ -725,7 +725,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 Diversifier(d)
             };
 
-            if let Some(p) = viewing_key.to_payment_address(diversifier) {
+            if let Some(p) = viewing_key.ivk().to_payment_address(diversifier) {
                 payment_address = p;
                 break;
             }
@@ -874,7 +874,7 @@ fn test_output_circuit_with_bls12_381() {
                 Diversifier(d)
             };
 
-            if let Some(p) = viewing_key.to_payment_address(diversifier) {
+            if let Some(p) = viewing_key.ivk().to_payment_address(diversifier) {
                 payment_address = p;
                 break;
             }

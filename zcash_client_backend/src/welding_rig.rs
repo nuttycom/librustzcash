@@ -13,7 +13,7 @@ use zcash_primitives::{
 };
 
 use crate::proto::compact_formats::{CompactBlock, CompactOutput};
-use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
+use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
 /// Scans a [`CompactOutput`] with a set of [`ExtendedFullViewingKey`]s.
 ///
@@ -27,7 +27,7 @@ fn scan_output<P: consensus::Parameters>(
     height: BlockHeight,
     (index, output): (usize, CompactOutput),
     ivks: &[SaplingIvk],
-    spent_from_accounts: &HashSet<usize>,
+    spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
     block_witnesses: &mut [&mut IncrementalWitness<Node>],
@@ -50,6 +50,9 @@ fn scan_output<P: consensus::Parameters>(
     }
     tree.append(node).unwrap();
 
+    // FIXME: this enumerate() is suspicious, it depends
+    // upon a consistent ordering of ivks for association with
+    // account IDs, which seems quite likely to be wrong.
     for (account, ivk) in ivks.iter().enumerate() {
         let (note, to) =
             match try_sapling_compact_note_decryption(params, height, &ivk.0, &epk, &cmu, &ct) {
@@ -63,7 +66,7 @@ fn scan_output<P: consensus::Parameters>(
         // - Change created by spending fractions of notes.
         // - Notes created by consolidation transactions.
         // - Notes sent from one account to itself.
-        let is_change = spent_from_accounts.contains(&account);
+        let is_change = spent_from_accounts.contains(&AccountId(account as u32));
 
         return Some(WalletShieldedOutput {
             index,
@@ -90,7 +93,7 @@ pub fn scan_block<P: consensus::Parameters>(
     params: &P,
     block: CompactBlock,
     ivks: &[SaplingIvk],
-    nullifiers: &[(&[u8], usize)],
+    nullifiers: &[(&[u8], AccountId)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx> {
@@ -112,14 +115,14 @@ pub fn scan_block<P: consensus::Parameters>(
                 // a WalletShieldedSpend if there is a match, in constant time.
                 nullifiers
                     .iter()
-                    .map(|&(nf, account)| CtOption::new(account as u64, nf.ct_eq(&spend.nf[..])))
-                    .fold(CtOption::new(0, 0.into()), |first, next| {
+                    .map(|&(nf, account)| CtOption::new(account, nf.ct_eq(&spend.nf[..])))
+                    .fold(CtOption::new(AccountId(0), 0.into()), |first, next| {
                         CtOption::conditional_select(&next, &first, first.is_some())
                     })
                     .map(|account| WalletShieldedSpend {
                         index,
                         nf: spend.nf,
-                        account: account as usize,
+                        account: account,
                     })
             })
             .filter(|spend| spend.is_some().into())
@@ -204,7 +207,10 @@ mod tests {
     };
 
     use super::scan_block;
-    use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
+    use crate::{
+        proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx},
+        wallet::AccountId
+    };
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -324,7 +330,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk],
+            &[extfvk.fvk.vk.ivk()],
             &[],
             &mut tree,
             &mut [],
@@ -363,7 +369,7 @@ mod tests {
         let txs = scan_block(
             &Network::TestNetwork,
             cb,
-            &[extfvk],
+            &[extfvk.fvk.vk.ivk()],
             &[],
             &mut tree,
             &mut [],
@@ -389,7 +395,7 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let nf = [7; 32];
-        let account = 12;
+        let account = AccountId(12);
 
         let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);

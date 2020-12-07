@@ -1,6 +1,8 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
+use subtle::{ConditionallySelectable, Choice};
+
 use zcash_primitives::{
     keys::OutgoingViewingKey,
     merkle_tree::IncrementalWitness,
@@ -10,8 +12,14 @@ use zcash_primitives::{
 };
 
 /// A type-safe wrapper for account identifiers.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct AccountId(pub u32);
+
+impl ConditionallySelectable for AccountId {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        AccountId(u32::conditional_select(&a.0, &b.0, choice))
+    }
+}
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
@@ -31,7 +39,7 @@ pub struct WalletTx {
 pub struct WalletShieldedSpend {
     pub index: usize,
     pub nf: Vec<u8>,
-    pub account: usize,
+    pub account: AccountId,
 }
 
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.

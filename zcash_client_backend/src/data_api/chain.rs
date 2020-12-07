@@ -181,7 +181,7 @@ where
         let txs: Vec<WalletTx> = {
             let nf_refs: Vec<_> = nullifiers
                 .iter()
-                .map(|(nf, acc)| (&nf[..], acc.0 as usize))
+                .map(|(nf, acc)| (&nf[..], *acc))
                 .collect();
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
             let ivks: Vec<SaplingIvk> = extfvks.iter().map(|extfvk| extfvk.fvk.vk.ivk()).collect();
