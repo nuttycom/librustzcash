@@ -336,7 +336,7 @@ where
 
                 // Mark notes as spent and remove them from the scanning cache
                 for spend in &tx.shielded_spends {
-                    up.mark_spent(tx_row, &spend.nf)?;
+                    up.mark_sapling_note_spent(tx_row, &spend.nf)?;
                 }
 
                 // remove spent nullifiers from the nullifier set

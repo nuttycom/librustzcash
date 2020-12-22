@@ -7,11 +7,15 @@ use std::collections::HashMap;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
+    legacy::TransparentAddress,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
     primitives::{Nullifier, PaymentAddress},
     sapling::Node,
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{
+        components::{Amount, OutPoint},
+        Transaction, TxId,
+    },
     zip32::ExtendedFullViewingKey,
 };
 
@@ -20,13 +24,13 @@ use zcash_client_backend::{
     data_api::{error::Error, ShieldedOutput},
     encoding::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
-        encode_payment_address,
+        encode_payment_address, AddressCodec,
     },
-    wallet::{AccountId, WalletTx},
+    wallet::{AccountId, WalletTransparentOutput, WalletTx},
     DecryptedOutput,
 };
 
-use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
+use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, UtxoId, WalletDB};
 
 pub mod init;
 pub mod transact;
@@ -438,6 +442,57 @@ pub fn get_nullifiers<P>(
     Ok(res)
 }
 
+pub fn get_spendable_transparent_utxos<P: consensus::Parameters>(
+    wdb: &WalletDB<P>,
+    anchor_height: BlockHeight,
+    address: &TransparentAddress,
+) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
+    let mut stmt_blocks = wdb.conn.prepare(
+        "SELECT address, prevout_txid, prevout_idx, script, value_zat, height 
+         FROM utxos 
+         WHERE address = ? 
+         AND height <= ?
+         AND spent_in_tx IS NULL",
+    )?;
+
+    let addr_str = address.encode(&wdb.params);
+
+    let rows = stmt_blocks.query_map(params![addr_str, u32::from(anchor_height)], |row| {
+        let addr: String = row.get(0)?;
+        let address = TransparentAddress::decode(&wdb.params, &addr).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                addr.len(),
+                rusqlite::types::Type::Text,
+                Box::new(e),
+            )
+        })?;
+
+        let id: Vec<u8> = row.get(1)?;
+
+        let mut txid_bytes = [0u8; 32];
+        txid_bytes.copy_from_slice(&id);
+        let index: i32 = row.get(2)?;
+        let script: Vec<u8> = row.get(3)?;
+        let value: i64 = row.get(4)?;
+        let height: u32 = row.get(5)?;
+
+        Ok(WalletTransparentOutput {
+            address: address,
+            outpoint: OutPoint::new(txid_bytes, index as u32),
+            script: script,
+            value: Amount::from_i64(value).unwrap(),
+            height: BlockHeight::from(height),
+        })
+    })?;
+
+    let mut utxos = Vec::<WalletTransparentOutput>::new();
+
+    for utxo in rows {
+        utxos.push(utxo.unwrap())
+    }
+    Ok(utxos)
+}
+
 pub fn insert_block<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     block_height: BlockHeight,
@@ -517,15 +572,53 @@ pub fn put_tx_data<'a, P>(
     }
 }
 
-pub fn mark_spent<'a, P>(
+pub fn mark_sapling_note_spent<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
     nf: &Nullifier,
 ) -> Result<(), SqliteClientError> {
     stmts
-        .stmt_mark_recived_note_spent
+        .stmt_mark_sapling_note_spent
         .execute(&[tx_ref.to_sql()?, nf.0.to_sql()?])?;
     Ok(())
+}
+
+pub fn mark_transparent_utxo_spent<'a, P>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    tx_ref: i64,
+    outpoint: &OutPoint,
+) -> Result<(), SqliteClientError> {
+    let sql_args: &[(&str, &dyn ToSql)] = &[
+        (&":spent_in_tx", &tx_ref),
+        (&":prevout_txid", &outpoint.hash().to_vec()),
+        (&":prevout_idx", &outpoint.n()),
+    ];
+
+    stmts
+        .stmt_mark_transparent_utxo_spent
+        .execute_named(&sql_args)?;
+
+    Ok(())
+}
+
+pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    output: &WalletTransparentOutput,
+) -> Result<UtxoId, SqliteClientError> {
+    let sql_args: &[(&str, &dyn ToSql)] = &[
+        (&":address", &output.address.encode(&stmts.wallet_db.params)),
+        (&":prevout_txid", &output.outpoint.hash().to_vec()),
+        (&":prevout_idx", &output.outpoint.n()),
+        (&":script", &output.script),
+        (&":value_zat", &i64::from(output.value)),
+        (&":height", &u32::from(output.height)),
+    ];
+
+    stmts
+        .stmt_insert_received_transparent_utxo
+        .execute_named(&sql_args)?;
+
+    Ok(UtxoId(stmts.wallet_db.conn.last_insert_rowid()))
 }
 
 // Assumptions:
@@ -674,7 +767,6 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
 
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use tempfile::NamedTempFile;
