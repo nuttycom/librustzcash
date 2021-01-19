@@ -4,6 +4,7 @@
 use subtle::{Choice, ConditionallySelectable};
 
 use zcash_primitives::{
+    memo::Memo,
     merkle_tree::IncrementalWitness,
     sapling::{
         keys::OutgoingViewingKey, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
@@ -61,6 +62,7 @@ pub struct WalletShieldedOutput<N> {
     pub is_change: bool,
     pub witness: IncrementalWitness<Node>,
     pub nf: N,
+    pub memo: Option<Memo>,
 }
 
 /// Information about a note that is tracked by the wallet that is available for spending,

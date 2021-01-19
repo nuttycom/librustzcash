@@ -682,7 +682,7 @@ pub fn mark_spent<'a, P>(
     nf: &Nullifier,
 ) -> Result<(), SqliteClientError> {
     stmts
-        .stmt_mark_recived_note_spent
+        .stmt_mark_received_note_spent
         .execute(&[tx_ref.to_sql()?, nf.0.to_sql()?])?;
     Ok(())
 }

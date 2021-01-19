@@ -83,6 +83,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
             is_change,
             witness,
             nf,
+            memo: None,
         });
     }
 

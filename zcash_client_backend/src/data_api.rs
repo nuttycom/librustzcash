@@ -269,6 +269,8 @@ pub trait BlockSource {
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
+    use sorted_vec::SortedVec;
+    use std::cmp::Ordering;
     use std::collections::HashMap;
 
     use zcash_primitives::{
@@ -291,89 +293,210 @@ pub mod testing {
         WalletWrite,
     };
 
-    pub struct MockBlockSource {}
+    struct MemoryWalletBlock {
+        height: BlockHeight,
+        hash: BlockHash,
+        block_time: u32,
+        commitment_tree: CommitmentTree<Node>,
+        // Just the transactions that map to an account in this wallet
+        transactions: HashMap<TxId, WalletTx>,
+    }
 
-    impl BlockSource for MockBlockSource {
-        type Error = Error<u32>;
-
-        fn with_blocks<F>(
-            &self,
-            _from_height: BlockHeight,
-            _limit: Option<u32>,
-            _with_row: F,
-        ) -> Result<(), Self::Error>
-        where
-            F: FnMut(CompactBlock) -> Result<(), Self::Error>,
-        {
-            Ok(())
+    impl PartialEq for MemoryWalletBlock {
+        fn eq(&self, other: &Self) -> bool {
+            (self.height, self.block_time) == (other.height, other.block_time)
         }
     }
 
-    pub struct MockWalletDb {}
+    impl Eq for MemoryWalletBlock {}
 
-    impl WalletRead for MockWalletDb {
-        type Error = Error<u32>;
-        type NoteRef = u32;
+    impl PartialOrd for MemoryWalletBlock {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some((self.height, self.block_time).cmp(&(other.height, other.block_time)))
+        }
+    }
+
+    impl Ord for MemoryWalletBlock {
+        fn cmp(&self, other: &Self) -> Ordering {
+            (self.height, self.block_time).cmp(&(other.height, other.block_time))
+        }
+    }
+
+    pub struct MemoryWalletDb {
+        // A sorted vector of CompactBlock values
+        blocks: SortedVec<MemoryWalletBlock>,
+        tx_idx: HashMap<TxId, BlockHeight>,
+        accounts: HashMap<AccountId, ExtendedFullViewingKey>,
+        spentness: HashMap<Nullifier, (TxId, bool)>,
+    }
+
+    pub enum MemoryWalletError {
+        DataApiError(Error<u32>),
+        MemoDecryptionError(std::str::Utf8Error),
+    }
+
+    impl WalletRead for MemoryWalletDb {
+        type Error = MemoryWalletError;
+        type NoteRef = (TxId, usize);
         type TxRef = TxId;
 
         fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-            Ok(None)
+            Ok(if self.blocks.len() == 0 {
+                None
+            } else {
+                Some((
+                    self.blocks[0].height,
+                    self.blocks[self.blocks.len() - 1].height,
+                ))
+            })
         }
 
         fn get_block_hash(
             &self,
-            _block_height: BlockHeight,
+            block_height: BlockHeight,
         ) -> Result<Option<BlockHash>, Self::Error> {
-            Ok(None)
+            Ok(self.blocks.iter().find_map(|b| {
+                if b.height == block_height {
+                    Some(b.hash)
+                } else {
+                    None
+                }
+            }))
         }
 
-        fn get_tx_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-            Ok(None)
+        fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(self.tx_idx.get(&txid).map(|h| h.clone()))
         }
 
-        fn get_address(&self, _account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
-            Ok(None)
+        fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
+            self.accounts
+                .get(&account)
+                .map(|extfvk| {
+                    extfvk
+                        .default_address()
+                        .map(|(_, a)| a)
+                        .map_err(|_| Error::InvalidExtSK(account))
+                })
+                .transpose()
+                .map_err(MemoryWalletError::DataApiError)
         }
 
         fn get_extended_full_viewing_keys(
             &self,
         ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
-            Ok(HashMap::new())
+            Ok(self.accounts.clone())
         }
 
         fn is_valid_account_extfvk(
             &self,
-            _account: AccountId,
-            _extfvk: &ExtendedFullViewingKey,
+            account: AccountId,
+            extfvk: &ExtendedFullViewingKey,
         ) -> Result<bool, Self::Error> {
-            Ok(false)
+            Ok(self
+                .accounts
+                .get(&account)
+                .filter(|extfvk0| extfvk0 == &extfvk)
+                .is_some())
         }
 
         fn get_balance_at(
             &self,
-            _account: AccountId,
-            _anchor_height: BlockHeight,
+            account: AccountId,
+            height: BlockHeight,
         ) -> Result<Amount, Self::Error> {
-            Ok(Amount::zero())
+            let mut received_amounts: HashMap<Nullifier, Amount> = HashMap::new();
+            Ok(self.blocks.iter().filter(|b| b.height <= height).fold(
+                Amount::zero(),
+                |acc, block| {
+                    block.transactions.values().fold(acc, |acc, wallet_tx| {
+                        // add to our balance when we receive an output
+                        let total_received = wallet_tx
+                            .shielded_outputs
+                            .iter()
+                            .filter(|s| s.account == account)
+                            .fold(acc, |acc, o| {
+                                let nf = o.note.nf(
+                                    &self.accounts.get(&account).unwrap().fvk.vk,
+                                    o.witness.position() as u64,
+                                );
+                                let amount = Amount::from_u64(o.note.value).unwrap();
+
+                                // cache received amounts
+                                received_amounts.insert(nf, amount);
+                                acc + amount
+                            });
+
+                        // subtract the previously cached received amount when we observe
+                        // a spend of its nullifier
+                        wallet_tx
+                            .shielded_spends
+                            .iter()
+                            .filter(|s| {
+                                self.spentness
+                                    .get(&s.nf)
+                                    .filter(|(_, spent)| *spent)
+                                    .is_some()
+                            })
+                            .fold(total_received, |acc, s| {
+                                received_amounts.get(&s.nf).map_or(acc, |amt| acc - *amt)
+                            })
+                    })
+                },
+            ))
         }
 
         fn get_memo(&self, _id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
-            Ok(Memo::Empty)
+            self.blocks
+                .iter()
+                .find_map(|b| {
+                    b.transactions.iter().find_map(|(txid, tx)| {
+                        if *txid == id_note.0 {
+                            tx.shielded_outputs.iter().find_map(|wso| {
+                                if wso.index == id_note.1 {
+                                    wso.memo.clone().and_then(|m| m.to_utf8())
+                                } else {
+                                    None
+                                }
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .transpose()
+                .map_err(MemoryWalletError::MemoDecryptionError)
         }
 
         fn get_commitment_tree(
             &self,
-            _block_height: BlockHeight,
+            block_height: BlockHeight,
         ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
-            Ok(None)
+            Ok(self.blocks.iter().find_map(|b| {
+                if b.height == block_height {
+                    Some(b.commitment_tree.clone())
+                } else {
+                    None
+                }
+            }))
         }
 
         #[allow(clippy::type_complexity)]
         fn get_witnesses(
             &self,
-            _block_height: BlockHeight,
+            block_height: BlockHeight,
         ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-            Ok(Vec::new())
+            Ok(self
+                .blocks
+                .iter()
+                .filter(|b| b.height == block_height)
+                .flat_map(|b| {
+                    b.transactions.iter().flat_map(|(txid, tx)| {
+                        tx.shielded_outputs
+                            .iter()
+                            .map(move |wso| ((txid.clone(), wso.index), wso.witness.clone()))
+                    })
+                })
+                .collect())
         }
 
         fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
@@ -405,7 +528,15 @@ pub mod testing {
             _block: &PrunedBlock,
             _updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
         ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-            Ok(vec![])
+            self.blocks.insert(MemoryWalletBlock {
+                height: block_height,
+                hash: block_hash,
+                block_time,
+                commitment_tree: commitment_tree.clone(),
+                transactions: HashMap::new(), //FIXME
+            });
+
+            Ok(())
         }
 
         fn store_received_tx(

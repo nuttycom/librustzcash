@@ -122,7 +122,7 @@ impl<P: consensus::Parameters> WalletDb<P> {
                 stmt_select_tx_ref: self.conn.prepare(
                     "SELECT id_tx FROM transactions WHERE txid = ?",
                 )?,
-                stmt_mark_recived_note_spent: self.conn.prepare(
+                stmt_mark_received_note_spent: self.conn.prepare(
                     "UPDATE received_notes SET spent = ? WHERE nf = ?"
                 )?,
                 stmt_insert_received_note: self.conn.prepare(
@@ -275,7 +275,7 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_update_tx_data: Statement<'a>,
     stmt_select_tx_ref: Statement<'a>,
 
-    stmt_mark_recived_note_spent: Statement<'a>,
+    stmt_mark_received_note_spent: Statement<'a>,
 
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
