@@ -2,12 +2,18 @@
 #![cfg(feature = "transparent-inputs")]
 
 use zcash_primitives::{
-    legacy::TransparentAddress,
     zip32::{ChildIndex, ExtendedSpendingKey},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{
+    legacy::TransparentAddress,
+};
+
+#[cfg(feature = "transparent-inputs")]
 use secp256k1::{key::PublicKey, Secp256k1};
 
+#[cfg(feature = "transparent-inputs")]
 use sha2::{Digest, Sha256};
 
 /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
@@ -41,6 +47,7 @@ pub fn spending_key(seed: &[u8], coin_type: u32, account: u32) -> ExtendedSpendi
     )
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub fn derive_transparent_address_from_secret_key(
     secret_key: secp256k1::key::SecretKey,
 ) -> TransparentAddress {
