@@ -80,7 +80,7 @@ impl fmt::Display for NoteId {
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
 #[derive(Debug, Copy, Clone)]
-pub struct UtxoId(i64);
+pub struct UtxoId(pub i64);
 
 /// A wrapper for the sqlite connection to the wallet database.
 pub struct WalletDB<P> {
