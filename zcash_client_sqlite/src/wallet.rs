@@ -595,8 +595,8 @@ pub fn get_nullifiers<P>(
 
 pub fn get_spendable_transparent_utxos<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
-    anchor_height: BlockHeight,
     address: &TransparentAddress,
+    anchor_height: BlockHeight,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
         "SELECT address, prevout_txid, prevout_idx, script, value_zat, height 

@@ -281,10 +281,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
 
     fn get_spendable_transparent_utxos(
         &self,
-        anchor_height: BlockHeight,
         address: &TransparentAddress,
+        anchor_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        wallet::get_spendable_transparent_utxos(&self, anchor_height, address)
+        wallet::get_spendable_transparent_utxos(&self, address, anchor_height)
     }
 }
 
@@ -409,11 +409,11 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
 
     fn get_spendable_transparent_utxos(
         &self,
-        anchor_height: BlockHeight,
         address: &TransparentAddress,
+        anchor_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         self.wallet_db
-            .get_spendable_transparent_utxos(anchor_height, address)
+            .get_spendable_transparent_utxos(address, anchor_height)
     }
 }
 

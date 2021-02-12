@@ -182,8 +182,8 @@ pub trait WalletRead {
 
     fn get_spendable_transparent_utxos(
         &self,
-        anchor_height: BlockHeight,
         address: &TransparentAddress,
+        anchor_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
 }
 
