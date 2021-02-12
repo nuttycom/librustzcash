@@ -600,7 +600,7 @@ pub fn get_nullifiers<P>(
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub fn get_spendable_transparent_utxos<P: consensus::Parameters>(
+pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
     address: &TransparentAddress,
     anchor_height: BlockHeight,

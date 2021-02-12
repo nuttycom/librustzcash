@@ -166,16 +166,16 @@ pub trait WalletRead {
     /// with which they are associated.
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
 
-    /// Return all spendable notes.
-    fn get_spendable_sapling_notes(
+    /// Return all unspent notes.
+    fn get_unspent_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
-    /// Returns a list of spendable notes sufficient to cover the specified
+    /// Returns a list of unspent notes sufficient to cover the specified
     /// target value, if possible.
-    fn select_spendable_sapling_notes(
+    fn select_unspent_sapling_notes(
         &self,
         account: AccountId,
         target_value: Amount,
@@ -183,7 +183,7 @@ pub trait WalletRead {
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
     #[cfg(feature = "transparent-inputs")]
-    fn get_spendable_transparent_utxos(
+    fn get_unspent_transparent_utxos(
         &self,
         address: &TransparentAddress,
         anchor_height: BlockHeight,
@@ -397,7 +397,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_spendable_sapling_notes(
+        fn get_unspent_sapling_notes(
             &self,
             _account: AccountId,
             _anchor_height: BlockHeight,
@@ -405,7 +405,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn select_spendable_sapling_notes(
+        fn select_unspent_sapling_notes(
             &self,
             _account: AccountId,
             _target_value: Amount,
@@ -415,7 +415,7 @@ pub mod testing {
         }
 
         #[cfg(feature = "transparent-inputs")]
-        fn get_spendable_transparent_utxos(
+        fn get_unspent_transparent_utxos(
             &self,
             _address: &TransparentAddress,
             _anchor_height: BlockHeight,
