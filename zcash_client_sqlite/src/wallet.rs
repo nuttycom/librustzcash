@@ -635,9 +635,9 @@ pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
         let height: u32 = row.get(5)?;
 
         Ok(WalletTransparentOutput {
-            address: address,
+            address,
             outpoint: OutPoint::new(txid_bytes, index as u32),
-            script: script,
+            script,
             value: Amount::from_i64(value).unwrap(),
             height: BlockHeight::from(height),
         })
