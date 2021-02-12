@@ -41,7 +41,6 @@ use rusqlite::{Connection, Statement, NO_PARAMS};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     primitives::{Nullifier, PaymentAddress},
@@ -56,10 +55,16 @@ use zcash_client_backend::{
     },
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletTransparentOutput},
+    wallet::{AccountId, SpendableNote},
 };
 
 use crate::error::SqliteClientError;
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    zcash_client_backend::wallet::WalletTransparentOutput,
+    zcash_primitives::legacy::TransparentAddress,
+};
 
 pub mod chain;
 pub mod error;
@@ -84,6 +89,7 @@ impl fmt::Display for NoteId {
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
+#[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Copy, Clone)]
 pub struct UtxoId(pub i64);
 
@@ -139,6 +145,7 @@ impl<P: consensus::Parameters> WalletDB<P> {
                     WHERE prevout_txid = :prevout_txid
                     AND prevout_idx = :prevout_idx"
                 )?,
+                #[cfg(feature = "transparent-inputs")]
                 stmt_insert_received_transparent_utxo: self.conn.prepare(
                     "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
                     VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
@@ -279,6 +286,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         )
     }
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_utxos(
         &self,
         address: &TransparentAddress,
@@ -309,6 +317,7 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_mark_sapling_note_spent: Statement<'a>,
     stmt_mark_transparent_utxo_spent: Statement<'a>,
 
+    #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
@@ -407,6 +416,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
             .select_spendable_sapling_notes(account, target_value, anchor_height)
     }
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_utxos(
         &self,
         address: &TransparentAddress,

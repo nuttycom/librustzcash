@@ -4,16 +4,16 @@
 use subtle::{Choice, ConditionallySelectable};
 
 use zcash_primitives::{
-    consensus::BlockHeight,
     keys::OutgoingViewingKey,
-    legacy::TransparentAddress,
     merkle_tree::IncrementalWitness,
     primitives::{Diversifier, Note, Nullifier, PaymentAddress, Rseed},
     sapling::Node,
-    transaction::{
-        components::{Amount, OutPoint},
-        TxId,
-    },
+    transaction::{components::Amount, TxId},
+};
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{
+    consensus::BlockHeight, legacy::TransparentAddress, transaction::components::OutPoint,
 };
 
 /// A type-safe wrapper for account identifiers.
@@ -44,6 +44,7 @@ pub struct WalletTx<N> {
     pub shielded_outputs: Vec<WalletShieldedOutput<N>>,
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub struct WalletTransparentOutput {
     pub address: TransparentAddress,
     pub outpoint: OutPoint,
