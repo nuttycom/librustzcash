@@ -292,7 +292,7 @@ where
 {
     let (latest_scanned_height, latest_anchor) = wallet_db
         .get_target_and_anchor_heights()
-        .and_then(|x| x.ok_or(Error::ScanRequired.into()))?;
+        .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     // derive the corresponding t-address
     let taddr = derive_transparent_address_from_secret_key(*sk);
@@ -320,7 +320,7 @@ where
     #[cfg(feature = "transparent-inputs")]
     for utxo in &utxos {
         let coin = TxOut {
-            value: utxo.value.clone(),
+            value: utxo.value,
             script_pubkey: Script {
                 0: utxo.script.clone(),
             },
