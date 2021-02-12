@@ -1,19 +1,17 @@
 //! Helper functions for managing light client key material.
 
-use zcash_primitives::{
-    zip32::{ChildIndex, ExtendedSpendingKey},
+use zcash_primitives::zip32::{ChildIndex, ExtendedSpendingKey};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::wallet::AccountId,
+    bs58::{self, decode::Error as Bs58Error},
+    hdwallet::{ExtendedPrivKey, KeyIndex},
+    secp256k1::{key::PublicKey, key::SecretKey, Secp256k1},
+    sha2::{Digest, Sha256},
+    std::convert::TryInto,
+    zcash_primitives::{consensus, legacy::TransparentAddress},
 };
-
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{
-    legacy::TransparentAddress,
-};
-
-#[cfg(feature = "transparent-inputs")]
-use secp256k1::{key::PublicKey, Secp256k1};
-
-#[cfg(feature = "transparent-inputs")]
-use sha2::{Digest, Sha256};
 
 /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
 /// given seed.
@@ -56,13 +54,106 @@ pub fn derive_transparent_address_from_secret_key(
     TransparentAddress::PublicKey(*hash160.finalize().as_ref())
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub fn derive_secret_key_from_seed<P: consensus::Parameters>(
+    params: &P,
+    seed: &[u8],
+    account: AccountId,
+    index: u32,
+) -> Result<SecretKey, hdwallet::error::Error> {
+    let ext_t_key = ExtendedPrivKey::with_seed(&seed)?;
+    let private_key = ext_t_key
+        .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
+        .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
+        .derive_private_key(KeyIndex::hardened_from_normalize_index(account.0)?)?
+        .derive_private_key(KeyIndex::Normal(0))?
+        .derive_private_key(KeyIndex::Normal(index))?
+        .private_key;
+
+    Ok(private_key)
+}
+
+pub struct Wif(pub String);
+
+impl Wif {
+    pub fn from_secret_key(sk: &SecretKey, compressed: bool) -> Self {
+        let secret_key = sk.as_ref();
+        let mut wif = [0u8; 34];
+        wif[0] = 0x80;
+        wif[1..33].copy_from_slice(secret_key);
+        if compressed {
+            wif[33] = 0x01;
+            Wif(bs58::encode(&wif[..]).with_check().into_string())
+        } else {
+            Wif(bs58::encode(&wif[..]).with_check().into_string())
+        }
+    }
+}
+
+impl TryInto<SecretKey> for Wif {
+    type Error = Bs58Error;
+
+    fn try_into(self) -> Result<SecretKey, Self::Error> {
+        bs58::decode(&self.0)
+            .with_check(None)
+            .into_vec()
+            .map(|decoded| SecretKey::from_slice(&decoded[1..33]).expect("wrong size key"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::spending_key;
+
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        super::{derive_secret_key_from_seed, derive_transparent_address_from_secret_key, Wif},
+        crate::{encoding::AddressCodec, wallet::AccountId},
+        secp256k1::key::SecretKey,
+        std::convert::TryInto,
+        zcash_primitives::consensus::MAIN_NETWORK,
+    };
 
     #[test]
     #[should_panic]
     fn spending_key_panics_on_short_seed() {
         let _ = spending_key(&[0; 31][..], 0, 0);
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn sk_to_wif() {
+        let seed_hex = "6ef5f84def6f4b9d38f466586a8380a38593bd47c8cda77f091856176da47f26b5bd1c8d097486e5635df5a66e820d28e1d73346f499801c86228d43f390304f";
+        let seed = hex::decode(&seed_hex).unwrap();
+        let sk = derive_secret_key_from_seed(&MAIN_NETWORK, &seed, AccountId(0), 0).unwrap();
+        assert_eq!(
+            Wif::from_secret_key(&sk, true).0,
+            "L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string()
+        );
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn sk_to_taddr() {
+        let seed_hex = "6ef5f84def6f4b9d38f466586a8380a38593bd47c8cda77f091856176da47f26b5bd1c8d097486e5635df5a66e820d28e1d73346f499801c86228d43f390304f";
+        let seed = hex::decode(&seed_hex).unwrap();
+        let sk = derive_secret_key_from_seed(&MAIN_NETWORK, &seed, AccountId(0), 0).unwrap();
+        let taddr = derive_transparent_address_from_secret_key(sk);
+        assert_eq!(
+            taddr.encode(&MAIN_NETWORK),
+            "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string()
+        );
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn sk_wif_to_taddr() {
+        let sk_wif = Wif("L4BvDC33yLjMRxipZvdiUmdYeRfZmR8viziwsVwe72zJdGbiJPv2".to_string());
+        let sk: SecretKey = sk_wif.try_into().expect("invalid wif");
+        let taddr = derive_transparent_address_from_secret_key(sk);
+        assert_eq!(
+            taddr.encode(&MAIN_NETWORK),
+            "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string()
+        );
     }
 }

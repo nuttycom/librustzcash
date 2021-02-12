@@ -180,6 +180,7 @@ pub trait WalletRead {
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_utxos(
         &self,
         address: &TransparentAddress,
@@ -516,10 +517,11 @@ pub mod testing {
             Ok(Vec::new())
         }
 
+        #[cfg(feature = "transparent-inputs")]
         fn get_spendable_transparent_utxos(
             &self,
-            _anchor_height: BlockHeight,
             _address: &TransparentAddress,
+            _anchor_height: BlockHeight,
         ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
             Ok(Vec::new())
         }

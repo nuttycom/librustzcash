@@ -305,7 +305,7 @@ where
     let ovk = exfvk.fvk.ovk;
 
     // get UTXOs from DB
-    let utxos = wallet_db.get_spendable_transparent_utxos(latest_anchor, &taddr)?;
+    let utxos = wallet_db.get_spendable_transparent_utxos(&taddr, latest_anchor)?;
     let total_amount = utxos.iter().map(|utxo| utxo.value).sum::<Amount>();
 
     let fee = DEFAULT_FEE;
@@ -317,6 +317,7 @@ where
 
     let mut builder = Builder::new(params.clone(), latest_scanned_height);
 
+    #[cfg(feature = "transparent-inputs")]
     for utxo in &utxos {
         let coin = TxOut {
             value: utxo.value.clone(),

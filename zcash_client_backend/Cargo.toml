@@ -31,6 +31,7 @@ time = "0.2"
 zcash_primitives = { version = "0.4", path = "../zcash_primitives" }
 proptest = { version = "0.10.1", optional = true }
 percent-encoding = "2.1.0"
+hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "72f1f7a56c114eed484cefd6d402b7ef28158712", optional = true }
 
 [build-dependencies]
 protobuf-codegen-pure = "2.20"
@@ -45,7 +46,7 @@ zcash_proofs = { version = "0.4", path = "../zcash_proofs" }
 
 [features]
 transparent-inputs = ["ripemd160", "secp256k1"]
-test-dependencies = ["proptest", "zcash_primitives/test-dependencies"]
+test-dependencies = ["proptest", "zcash_primitives/test-dependencies", "hdwallet"]
 
 [badges]
 maintenance = { status = "actively-developed" }
