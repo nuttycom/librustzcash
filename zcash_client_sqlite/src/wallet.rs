@@ -23,7 +23,7 @@ use zcash_client_backend::{
     data_api::{error::Error, ShieldedOutput},
     encoding::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
-        encode_payment_address, 
+        encode_payment_address,
     },
     wallet::{AccountId, WalletTx},
     DecryptedOutput,
@@ -33,12 +33,9 @@ use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_primitives::legacy::TransparentAddress,
-    zcash_client_backend::{
-        encoding::AddressCodec,
-        wallet::WalletTransparentOutput,
-    },
     crate::UtxoId,
+    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
+    zcash_primitives::legacy::TransparentAddress,
 };
 
 pub mod init;
@@ -452,7 +449,7 @@ pub fn get_nullifiers<P>(
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub fn get_spendable_transparent_utxos<P: consensus::Parameters>(
+pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
     address: &TransparentAddress,
     anchor_height: BlockHeight,

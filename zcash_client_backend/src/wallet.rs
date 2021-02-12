@@ -8,19 +8,12 @@ use zcash_primitives::{
     merkle_tree::IncrementalWitness,
     primitives::{Diversifier, Note, Nullifier, PaymentAddress, Rseed},
     sapling::Node,
-    transaction::{
-        components::{Amount},
-        TxId,
-    },
+    transaction::{components::Amount, TxId},
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    zcash_primitives::{
-        consensus::BlockHeight,
-        legacy::TransparentAddress,
-        transaction::components::OutPoint,
-    }
+use zcash_primitives::{
+    consensus::BlockHeight, legacy::TransparentAddress, transaction::components::OutPoint,
 };
 
 /// A type-safe wrapper for account identifiers.
