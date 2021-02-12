@@ -73,8 +73,10 @@ pub fn derive_secret_key_from_seed<P: consensus::Parameters>(
     Ok(private_key)
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub struct Wif(pub String);
 
+#[cfg(feature = "transparent-inputs")]
 impl Wif {
     pub fn from_secret_key(sk: &SecretKey, compressed: bool) -> Self {
         let secret_key = sk.as_ref();
@@ -90,6 +92,7 @@ impl Wif {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
 impl TryInto<SecretKey> for Wif {
     type Error = Bs58Error;
 

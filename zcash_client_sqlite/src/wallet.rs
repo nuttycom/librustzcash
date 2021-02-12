@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
-    legacy::TransparentAddress,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
     primitives::{Nullifier, PaymentAddress},
@@ -24,13 +23,23 @@ use zcash_client_backend::{
     data_api::{error::Error, ShieldedOutput},
     encoding::{
         decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
-        encode_payment_address, AddressCodec,
+        encode_payment_address, 
     },
-    wallet::{AccountId, WalletTransparentOutput, WalletTx},
+    wallet::{AccountId, WalletTx},
     DecryptedOutput,
 };
 
-use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, UtxoId, WalletDB};
+use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDB};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    zcash_primitives::legacy::TransparentAddress,
+    zcash_client_backend::{
+        encoding::AddressCodec,
+        wallet::WalletTransparentOutput,
+    },
+    crate::UtxoId,
+};
 
 pub mod init;
 pub mod transact;
@@ -442,6 +451,7 @@ pub fn get_nullifiers<P>(
     Ok(res)
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub fn get_spendable_transparent_utxos<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
     address: &TransparentAddress,
@@ -601,6 +611,7 @@ pub fn mark_transparent_utxo_spent<'a, P>(
     Ok(())
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,

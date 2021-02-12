@@ -7,7 +7,6 @@ use std::fmt::Debug;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
-    legacy::TransparentAddress,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     note_encryption::Memo,
     primitives::{Note, Nullifier, PaymentAddress},
@@ -24,7 +23,13 @@ use crate::{
     data_api::wallet::ANCHOR_OFFSET,
     decrypt::DecryptedOutput,
     proto::compact_formats::CompactBlock,
-    wallet::{AccountId, SpendableNote, WalletShieldedOutput, WalletTransparentOutput, WalletTx},
+    wallet::{AccountId, SpendableNote, WalletShieldedOutput, WalletTx},
+};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    zcash_primitives::legacy::TransparentAddress,
+    crate::wallet::WalletTransparentOutput,
 };
 
 pub mod chain;
