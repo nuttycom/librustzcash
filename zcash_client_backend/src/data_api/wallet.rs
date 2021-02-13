@@ -283,6 +283,7 @@ pub fn shield_funds<E, N, P, D, R>(
     sk: &secp256k1::key::SecretKey,
     extsk: &ExtendedSpendingKey,
     memo: &Memo,
+    confirmations: u32
 ) -> Result<D::TxRef, E>
 where
     E: From<Error<N>>,
@@ -305,7 +306,7 @@ where
     let ovk = exfvk.fvk.ovk;
 
     // get UTXOs from DB
-    let utxos = wallet_db.get_unspent_transparent_utxos(&taddr, latest_anchor)?;
+    let utxos = wallet_db.get_unspent_transparent_utxos(&taddr, latest_anchor - confirmations)?;
     let total_amount = utxos.iter().map(|utxo| utxo.value).sum::<Amount>();
 
     let fee = DEFAULT_FEE;
