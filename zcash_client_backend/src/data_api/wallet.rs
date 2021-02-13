@@ -275,6 +275,7 @@ where
 }
 
 #[cfg(feature = "transparent-inputs")]
+#[allow(clippy::too_many_arguments)]
 pub fn shield_funds<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
@@ -283,7 +284,7 @@ pub fn shield_funds<E, N, P, D, R>(
     sk: &secp256k1::key::SecretKey,
     extsk: &ExtendedSpendingKey,
     memo: &Memo,
-    confirmations: u32
+    confirmations: u32,
 ) -> Result<D::TxRef, E>
 where
     E: From<Error<N>>,
