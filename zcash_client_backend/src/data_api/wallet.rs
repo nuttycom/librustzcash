@@ -266,6 +266,7 @@ where
 }
 
 #[cfg(feature = "transparent-inputs")]
+#[allow(clippy::too_many_arguments)]
 pub fn shield_funds<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
