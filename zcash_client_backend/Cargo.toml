@@ -25,7 +25,7 @@ protobuf = "2.20"
 rand_core = "0.5.1"
 ripemd160 = { version = "0.9.1", optional = true }
 secp256k1 = { version = "0.19", optional = true }
-sha2 = "0.9"
+sha2 = { version = "0.9", optional = true }
 subtle = "2.2.3"
 time = "0.2"
 zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
@@ -45,8 +45,8 @@ zcash_client_sqlite = { version = "0.3", path = "../zcash_client_sqlite" }
 zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
 
 [features]
-transparent-inputs = ["ripemd160", "secp256k1"]
-test-dependencies = ["proptest", "zcash_primitives/test-dependencies", "hdwallet"]
+transparent-inputs = ["ripemd160", "hdwallet", "sha2", "secp256k1"]
+test-dependencies = ["proptest", "zcash_primitives/test-dependencies", "hdwallet", "sha2"]
 
 [badges]
 maintenance = { status = "actively-developed" }
