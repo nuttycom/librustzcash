@@ -606,11 +606,13 @@ pub fn get_unspent_transparent_utxos<P: consensus::Parameters>(
     anchor_height: BlockHeight,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
-        "SELECT address, prevout_txid, prevout_idx, script, value_zat, height 
-         FROM utxos 
-         WHERE address = ? 
-         AND height <= ?
-         AND spent_in_tx IS NULL",
+        "SELECT u.address, u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height, tx.block as block
+         FROM utxos u
+         LEFT OUTER JOIN transactions tx
+         ON tx.id_tx = u.spent_in_tx
+         WHERE u.address = ?
+         AND u.height <= ?
+         AND block IS NULL",
     )?;
 
     let addr_str = address.encode(&wdb.params);
