@@ -205,9 +205,10 @@ pub struct PrunedBlock<'a> {
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
-pub struct ReceivedTransaction<'a> {
+pub struct DecryptedTransaction<'a> {
     pub tx: &'a Transaction,
-    pub outputs: &'a Vec<DecryptedOutput>,
+    pub account_id: AccountId,
+    pub sapling_outputs: &'a Vec<DecryptedOutput>,
 }
 
 /// A transaction that was constructed and sent by the wallet.
@@ -242,9 +243,9 @@ pub trait WalletWrite: WalletRead {
         updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
-    fn store_received_tx(
+    fn store_decrypted_tx(
         &mut self,
-        received_tx: &ReceivedTransaction,
+        received_tx: &DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error>;
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
@@ -304,7 +305,7 @@ pub mod testing {
     };
 
     use super::{
-        error::Error, BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead,
+        error::Error, BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead,
         WalletWrite,
     };
 
@@ -434,9 +435,9 @@ pub mod testing {
             Ok(vec![])
         }
 
-        fn store_received_tx(
+        fn store_decrypted_tx(
             &mut self,
-            _received_tx: &ReceivedTransaction,
+            _received_tx: &DecryptedTransaction,
         ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId([0u8; 32]))
         }

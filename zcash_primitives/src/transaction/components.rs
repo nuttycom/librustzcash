@@ -41,11 +41,7 @@ pub struct OutPoint {
 
 impl std::fmt::Debug for OutPoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "OutPoint ({}, {})",
-            super::TxId(self.hash), self.n,
-        )
+        write!(f, "OutPoint ({}, {})", super::TxId(self.hash), self.n,)
     }
 }
 

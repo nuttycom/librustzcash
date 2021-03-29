@@ -1,7 +1,4 @@
-use log::Level;
-
 use std::fmt::Debug;
-use std::convert::TryFrom;
 use zcash_primitives::{
     consensus::{self, BranchId, NetworkUpgrade},
     memo::MemoBytes,
@@ -14,7 +11,12 @@ use zcash_primitives::{
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
-use crate::{address::RecipientAddress, data_api::{error::Error, ReceivedTransaction, SentTransaction, WalletWrite}, decrypt_transaction, encoding::AddressCodec, wallet::{AccountId, OvkPolicy}};
+use crate::{
+    address::RecipientAddress,
+    data_api::{error::Error, DecryptedTransaction, SentTransaction, WalletWrite},
+    decrypt_transaction,
+    wallet::{AccountId, OvkPolicy},
+};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::{legacy::Script, transaction::components::TxOut};
@@ -36,7 +38,6 @@ where
     P: consensus::Parameters,
     D: WalletWrite<Error = E>,
 {
-
     debug!("decrypt_and_store: {:?}", tx);
 
     // Fetch the ExtendedFullViewingKeys we are tracking
@@ -52,27 +53,13 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .ok_or(Error::SaplingNotActive)?;
 
-    let outputs = decrypt_transaction(params, height, tx, &extfvks);
-    if !outputs.is_empty() {
-        data.store_received_tx(&ReceivedTransaction {
-            tx,
-            outputs: &outputs,
-        })?;
-    }
+    let sapling_outputs = decrypt_transaction(params, height, tx, &extfvks);
 
-    // store z->t transactions in the same way the would be stored by create_spend_to_address
-    if !tx.vout.is_empty() {
-        // TODO: clarify with Kris the simplest way to determine account and iterate over outputs
-        // i.e. there are probably edge cases where we need to combine vouts into one "sent" transaction for the total value
-        data.store_sent_tx(&SentTransaction {
-            tx: &tx,
-            created: time::OffsetDateTime::now_utc(),
-            output_index: usize::try_from(0).unwrap(),
-            account: AccountId(0),
-            recipient_address: &RecipientAddress::Transparent(tx.vout[0].script_pubkey.address().unwrap()),
-            value: tx.vout[0].value,
-            memo: None,
-            utxos_spent: vec![],
+    if !(sapling_outputs.is_empty() && tx.vout.is_empty()) {
+        data.store_decrypted_tx(&DecryptedTransaction {
+            tx,
+            account_id: AccountId(0), //FIXME
+            sapling_outputs: &sapling_outputs,
         })?;
     }
 
