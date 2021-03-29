@@ -223,13 +223,19 @@ where
     }
 
     match to {
-        RecipientAddress::Shielded(to) => {
-            builder.add_sapling_output(ovk, to.clone(), value, memo.clone())
-        }
-
-        RecipientAddress::Transparent(to) => builder.add_transparent_output(&to, value),
-    }
-    .map_err(Error::Builder)?;
+        RecipientAddress::Shielded(to) => 
+            memo.clone().ok_or(Error::MemoRequired).and_then(|memo|
+                builder.add_sapling_output(ovk, to.clone(), value, memo)
+                .map_err(Error::Builder)
+            ),
+        RecipientAddress::Transparent(to) => 
+            if memo.is_some() {
+                Err(Error::MemoForbidden)
+            } else {
+                builder.add_transparent_output(&to, value)
+                .map_err(Error::Builder)
+            }
+    }?;
 
     let consensus_branch_id = BranchId::for_height(params, height);
     let (tx, tx_metadata) = builder
@@ -333,7 +339,7 @@ where
             Some(ovk),
             z_address.clone(),
             amount_to_shield,
-            Some(memo.clone()),
+            memo.clone(),
         )
         .map_err(Error::Builder)?;
 

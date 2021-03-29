@@ -110,7 +110,7 @@ impl SaplingOutput {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<MemoBytes>,
+        memo: MemoBytes,
     ) -> Result<Self, Error> {
         Self::new_internal(params, height, rng, ovk, to, value, memo)
     }
@@ -122,7 +122,7 @@ impl SaplingOutput {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<MemoBytes>,
+        memo: MemoBytes,
     ) -> Result<Self, Error> {
         let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
         if value.is_negative() {
@@ -142,7 +142,7 @@ impl SaplingOutput {
             ovk,
             to,
             note,
-            memo: memo.unwrap_or_else(MemoBytes::empty),
+            memo,
         })
     }
 
@@ -521,7 +521,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: Amount,
-        memo: Option<MemoBytes>,
+        memo: MemoBytes,
     ) -> Result<(), Error> {
         let output = SaplingOutput::new_internal(
             &self.params,
@@ -645,7 +645,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 return Err(Error::NoChangeAddress);
             };
 
-            self.add_sapling_output(Some(change_address.0), change_address.1, change, None)?;
+            self.add_sapling_output(Some(change_address.0), change_address.1, change, MemoBytes::empty())?;
         }
 
         //
@@ -965,6 +965,7 @@ mod tests {
     use crate::{
         consensus::{self, Parameters, H0, TEST_NETWORK},
         legacy::TransparentAddress,
+        memo::MemoBytes,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         primitives::Rseed,
         prover::mock::MockTxProver,
@@ -987,7 +988,7 @@ mod tests {
 
         let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
-            builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), None),
+            builder.add_sapling_output(Some(ovk), to, Amount::from_i64(-1).unwrap(), MemoBytes::empty()),
             Err(Error::InvalidAmount)
         );
     }
@@ -1106,7 +1107,7 @@ mod tests {
         {
             let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
-                .add_sapling_output(ovk, to.clone(), Amount::from_u64(50000).unwrap(), None)
+                .add_sapling_output(ovk, to.clone(), Amount::from_u64(50000).unwrap(), MemoBytes::empty())
                 .unwrap();
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
@@ -1155,7 +1156,7 @@ mod tests {
                 )
                 .unwrap();
             builder
-                .add_sapling_output(ovk, to.clone(), Amount::from_u64(30000).unwrap(), None)
+                .add_sapling_output(ovk, to.clone(), Amount::from_u64(30000).unwrap(), MemoBytes::empty())
                 .unwrap();
             builder
                 .add_transparent_output(
@@ -1196,7 +1197,7 @@ mod tests {
                 .add_sapling_spend(extsk, *to.diversifier(), note2, witness2.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), None)
+                .add_sapling_output(ovk, to, Amount::from_u64(30000).unwrap(), MemoBytes::empty())
                 .unwrap();
             builder
                 .add_transparent_output(
