@@ -792,6 +792,22 @@ pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     Ok(UtxoId(stmts.wallet_db.conn.last_insert_rowid()))
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub fn delete_utxos_above<'a, P: consensus::Parameters>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    taddr: &TransparentAddress,
+    height: BlockHeight,
+) -> Result<usize, SqliteClientError> {
+    let sql_args: &[(&str, &dyn ToSql)] = &[
+        (&":address", &taddr.encode(&stmts.wallet_db.params)),
+        (&":above_height", &u32::from(height)),
+    ];
+
+    let rows = stmts .stmt_delete_utxos .execute_named(&sql_args)?;
+
+    Ok(rows)
+}
+
 // Assumptions:
 // - A transaction will not contain more than 2^63 shielded outputs.
 // - A note value will never exceed 2^63 zatoshis.
