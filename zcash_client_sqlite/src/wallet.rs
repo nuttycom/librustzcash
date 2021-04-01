@@ -954,17 +954,11 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
 mod tests {
     use tempfile::NamedTempFile;
 
-    use zcash_primitives::{
-        transaction::components::Amount,
-    };
+    use zcash_primitives::transaction::components::Amount;
 
     use zcash_client_backend::data_api::WalletRead;
 
-    use crate::{
-        tests,
-        wallet::init::{init_wallet_db},
-        AccountId, WalletDB,
-    };
+    use crate::{tests, wallet::init::init_wallet_db, AccountId, WalletDB};
 
     use super::{get_address, get_balance};
 

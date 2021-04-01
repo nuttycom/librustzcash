@@ -69,9 +69,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_primitives::{
-        block::BlockHash,
-        transaction::components::Amount,
-        zip32::{ExtendedSpendingKey},
+        block::BlockHash, transaction::components::Amount, zip32::ExtendedSpendingKey,
     };
 
     use zcash_client_backend::data_api::WalletRead;
@@ -84,15 +82,10 @@ mod tests {
         chain::init::init_cache_database,
         error::SqliteClientError,
         tests::{
-            self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
-            sapling_activation_height,
-            init_test_accounts_table,
+            self, fake_compact_block, fake_compact_block_spending, init_test_accounts_table,
+            insert_into_cache, sapling_activation_height,
         },
-        wallet::{
-            get_balance,
-            init::{init_wallet_db},
-            rewind_to_height,
-        },
+        wallet::{get_balance, init::init_wallet_db, rewind_to_height},
         AccountId, BlockDB, NoteId, WalletDB,
     };
 
