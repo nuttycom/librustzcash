@@ -713,7 +713,7 @@ mod tests {
         let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(db_data, &[&extfvk], &[&taddr]).unwrap();
+        init_accounts_table(db_data, &[extfvk.clone()], &[taddr.clone()]).unwrap();
         (extfvk, taddr)
     }
 

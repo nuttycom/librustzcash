@@ -171,8 +171,8 @@ pub fn init_wallet_db<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
 /// [`create_spend_to_address`]: zcash_client_backend::data_api::wallet::create_spend_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
     wdb: &WalletDB<P>,
-    extfvks: &[&ExtendedFullViewingKey],
-    taddrs: &[&TransparentAddress],
+    extfvks: &[ExtendedFullViewingKey],
+    taddrs: &[TransparentAddress],
 ) -> Result<(), SqliteClientError> {
     //TODO: make this a proper error?
     assert!(extfvks.len() == taddrs.len());
@@ -295,11 +295,11 @@ mod tests {
         let (extsk, tsk) = tests::derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[&extfvk], &[&taddr]).unwrap();
+        init_accounts_table(&db_data, &[extfvk.clone()], &[taddr.clone()]).unwrap();
 
         // Subsequent calls should return an error
         init_accounts_table(&db_data, &[], &[]).unwrap_err();
-        init_accounts_table(&db_data, &[&extfvk], &[&taddr]).unwrap_err();
+        init_accounts_table(&db_data, &[extfvk], &[taddr]).unwrap_err();
     }
 
     #[test]
@@ -339,7 +339,7 @@ mod tests {
         let (extsk, tsk) = tests::derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
         let extfvk = ExtendedFullViewingKey::from(&extsk);
         let taddr = derive_transparent_address_from_secret_key(&tsk);
-        init_accounts_table(&db_data, &[&extfvk], &[&taddr]).unwrap();
+        init_accounts_table(&db_data, &[extfvk], &[taddr]).unwrap();
 
         // The account's address should be in the data DB
         let pa = get_address(&db_data, AccountId(0)).unwrap();
