@@ -29,7 +29,8 @@ pub fn init_wallet_db<P>(wdb: &WalletDB<P>) -> Result<(), rusqlite::Error> {
         "CREATE TABLE IF NOT EXISTS accounts (
             account INTEGER PRIMARY KEY,
             extfvk TEXT NOT NULL,
-            address TEXT NOT NULL
+            address TEXT NOT NULL,
+            transparent_address TEXT NOT NULL
         )",
         NO_PARAMS,
     )?;
