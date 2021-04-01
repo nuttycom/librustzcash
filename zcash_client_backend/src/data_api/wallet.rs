@@ -1,6 +1,4 @@
-//! Functions for scanning the chain and extracting relevant information.
 use std::fmt::Debug;
-
 use zcash_primitives::{
     consensus::{self, BranchId, NetworkUpgrade},
     memo::MemoBytes,
@@ -15,7 +13,7 @@ use zcash_primitives::{
 
 use crate::{
     address::RecipientAddress,
-    data_api::{error::Error, ReceivedTransaction, SentTransaction, WalletWrite},
+    data_api::{error::Error, DecryptedTransaction, SentTransaction, WalletWrite},
     decrypt_transaction,
     wallet::{AccountId, OvkPolicy},
 };
@@ -40,6 +38,8 @@ where
     P: consensus::Parameters,
     D: WalletWrite<Error = E>,
 {
+    debug!("decrypt_and_store: {:?}", tx);
+
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
 
@@ -53,17 +53,16 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .ok_or(Error::SaplingNotActive)?;
 
-    let outputs = decrypt_transaction(params, height, tx, &extfvks);
-    if outputs.is_empty() {
-        Ok(())
-    } else {
-        data.store_received_tx(&ReceivedTransaction {
-            tx,
-            outputs: &outputs,
-        })?;
+    let sapling_outputs = decrypt_transaction(params, height, tx, &extfvks);
 
-        Ok(())
+    if !(sapling_outputs.is_empty() && tx.vout.is_empty()) {
+        data.store_decrypted_tx(&DecryptedTransaction {
+            tx,
+            sapling_outputs: &sapling_outputs,
+        })?;
     }
+
+    Ok(())
 }
 
 #[allow(clippy::needless_doctest_main)]
@@ -129,7 +128,7 @@ where
 /// };
 ///
 /// let account = AccountId(0);
-/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account.0);
+/// let extsk = spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().unwrap().1.into();
 ///
 /// let data_file = NamedTempFile::new().unwrap();
@@ -294,7 +293,7 @@ where
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
     // derive the corresponding t-address
-    let taddr = derive_transparent_address_from_secret_key(*sk);
+    let taddr = derive_transparent_address_from_secret_key(sk);
 
     // derive own shielded address from the provided extended spending key
     let z_address = extsk.default_address().unwrap().1;

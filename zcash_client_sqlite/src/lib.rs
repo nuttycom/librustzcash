@@ -50,8 +50,9 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
+    address::RecipientAddress,
     data_api::{
-        BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead, WalletWrite,
+        BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
     },
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
@@ -60,7 +61,6 @@ use zcash_client_backend::{
 
 use crate::error::SqliteClientError;
 
-#[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::WalletTransparentOutput,
     zcash_primitives::legacy::TransparentAddress,
@@ -89,7 +89,6 @@ impl fmt::Display for NoteId {
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
-#[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Copy, Clone)]
 pub struct UtxoId(pub i64);
 
@@ -145,10 +144,12 @@ impl<P: consensus::Parameters> WalletDB<P> {
                     WHERE prevout_txid = :prevout_txid
                     AND prevout_idx = :prevout_idx"
                 )?,
-                #[cfg(feature = "transparent-inputs")]
                 stmt_insert_received_transparent_utxo: self.conn.prepare(
                     "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
                     VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
+                )?,
+                stmt_delete_utxos: self.conn.prepare(
+                    "DELETE FROM utxos WHERE address = :address AND height > :above_height"
                 )?,
                 stmt_insert_received_note: self.conn.prepare(
                     "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
@@ -281,7 +282,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::transact::select_unspent_sapling_notes(&self, account, target_value, anchor_height)
     }
 
-    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_utxos(
         &self,
         address: &TransparentAddress,
@@ -312,8 +312,8 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_mark_sapling_note_spent: Statement<'a>,
     stmt_mark_transparent_utxo_spent: Statement<'a>,
 
-    #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
+    stmt_delete_utxos: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,
@@ -411,7 +411,6 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
             .select_unspent_sapling_notes(account, target_value, anchor_height)
     }
 
-    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_utxos(
         &self,
         address: &TransparentAddress,
@@ -508,18 +507,59 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         })
     }
 
-    fn store_received_tx(
+    fn store_decrypted_tx(
         &mut self,
-        received_tx: &ReceivedTransaction,
+        d_tx: &DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error> {
         self.transactionally(|up| {
-            let tx_ref = wallet::put_tx_data(up, received_tx.tx, None)?;
+            let tx_ref = wallet::put_tx_data(up, d_tx.tx, None)?;
 
-            for output in received_tx.outputs {
+            let mut spending_account_id: Option<AccountId> = None;
+            for output in d_tx.sapling_outputs {
                 if output.outgoing {
-                    wallet::put_sent_note(up, output, tx_ref)?;
+                    wallet::put_sent_note(
+                        up,
+                        tx_ref,
+                        output.index,
+                        output.account,
+                        RecipientAddress::Shielded(output.to.clone()),
+                        Amount::from_u64(output.note.value)
+                            .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
+                        Some(&output.memo),
+                    )?;
                 } else {
+                    match spending_account_id {
+                        Some(id) =>
+                            if id != output.account {
+                                panic!("Unable to determine a unique account identifier for z->t spend.");
+                            }
+                        None => {
+                            spending_account_id = Some(output.account);
+                        }
+                    }
+
                     wallet::put_received_note(up, output, tx_ref)?;
+                }
+            }
+
+            // store received z->t transactions in the same way they would be stored by
+            // create_spend_to_address If there are any of our shielded inputs, we interpret this
+            // as our z->t tx and store the vouts as our sent notes.
+            // FIXME this is a weird heuristic that is bound to trip us up somewhere.
+            if d_tx.sapling_outputs.iter().any(|output| !output.outgoing) {
+                for account_id in spending_account_id {
+                    for (i, txout) in d_tx.tx.vout.iter().enumerate() {
+                        // FIXME: We shouldn't be confusing notes and transparent outputs.
+                        wallet::put_sent_note(
+                            up,
+                            tx_ref,
+                            i,
+                            account_id,
+                            RecipientAddress::Transparent(txout.script_pubkey.address().unwrap()),
+                            txout.value,
+                            None,
+                        )?;
+                    }
                 }
             }
 
@@ -609,21 +649,28 @@ mod tests {
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
+    use secp256k1::key::SecretKey;
 
-    use zcash_client_backend::proto::compact_formats::{
-        CompactBlock, CompactOutput, CompactSpend, CompactTx,
+    use zcash_client_backend::{
+        keys::{
+            derive_secret_key_from_seed, derive_transparent_address_from_secret_key, spending_key,
+        },
+        proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx},
     };
 
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+        legacy::TransparentAddress,
         memo::MemoBytes,
         note_encryption::SaplingNoteEncryption,
         primitives::{Note, Nullifier, PaymentAddress},
         transaction::components::Amount,
         util::generate_random_rseed,
-        zip32::ExtendedFullViewingKey,
+        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
+
+    use crate::{wallet::init::init_accounts_table, AccountId, WalletDB};
 
     use super::BlockDB;
 
@@ -649,6 +696,25 @@ mod tests {
         Network::TestNetwork
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap()
+    }
+
+    pub(crate) fn derive_test_keys_from_seed(
+        seed: &[u8],
+        account: AccountId,
+    ) -> (ExtendedSpendingKey, SecretKey) {
+        let extsk = spending_key(seed, network().coin_type(), account);
+        let tsk = derive_secret_key_from_seed(&network(), seed, account, 0).unwrap();
+        (extsk, tsk)
+    }
+
+    pub(crate) fn init_test_accounts_table(
+        db_data: &WalletDB<Network>,
+    ) -> (ExtendedFullViewingKey, TransparentAddress) {
+        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8; 32], AccountId(0));
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let taddr = derive_transparent_address_from_secret_key(&tsk);
+        init_accounts_table(db_data, &[&extfvk], &[&taddr]).unwrap();
+        (extfvk, taddr)
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying

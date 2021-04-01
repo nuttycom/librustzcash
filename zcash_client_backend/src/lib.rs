@@ -1,10 +1,5 @@
-//! *A crate for implementing Zcash light clients.*
-//!
-//! `zcash_client_backend` contains Rust structs and traits for creating shielded Zcash
-//! light clients.
-
-// Catch documentation errors caused by code changes.
-#![deny(broken_intra_doc_links)]
+#[macro_use]
+extern crate log;
 
 pub mod address;
 pub mod data_api;

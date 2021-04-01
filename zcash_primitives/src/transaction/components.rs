@@ -33,10 +33,16 @@ const PHGR_PROOF_SIZE: usize = 33 + 33 + 65 + 33 + 33 + 33 + 33 + 33;
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
+}
+
+impl std::fmt::Debug for OutPoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "OutPoint ({}, {})", super::TxId(self.hash), self.n,)
+    }
 }
 
 impl OutPoint {
