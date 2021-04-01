@@ -61,7 +61,6 @@ use zcash_client_backend::{
 
 use crate::error::SqliteClientError;
 
-#[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::WalletTransparentOutput,
     zcash_primitives::legacy::TransparentAddress,
@@ -90,7 +89,6 @@ impl fmt::Display for NoteId {
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
-#[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Copy, Clone)]
 pub struct UtxoId(pub i64);
 
@@ -146,12 +144,10 @@ impl<P: consensus::Parameters> WalletDB<P> {
                     WHERE prevout_txid = :prevout_txid
                     AND prevout_idx = :prevout_idx"
                 )?,
-                #[cfg(feature = "transparent-inputs")]
                 stmt_insert_received_transparent_utxo: self.conn.prepare(
                     "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
                     VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
                 )?,
-                #[cfg(feature = "transparent-inputs")]
                 stmt_delete_utxos: self.conn.prepare(
                     "DELETE FROM utxos WHERE address = :address AND height > :above_height"
                 )?,
@@ -286,7 +282,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDB<P> {
         wallet::transact::select_unspent_sapling_notes(&self, account, target_value, anchor_height)
     }
 
-    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_utxos(
         &self,
         address: &TransparentAddress,
@@ -317,9 +312,7 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_mark_sapling_note_spent: Statement<'a>,
     stmt_mark_transparent_utxo_spent: Statement<'a>,
 
-    #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
-    #[cfg(feature = "transparent-inputs")]
     stmt_delete_utxos: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
@@ -418,7 +411,6 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
             .select_unspent_sapling_notes(account, target_value, anchor_height)
     }
 
-    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_utxos(
         &self,
         address: &TransparentAddress,
@@ -657,20 +649,33 @@ mod tests {
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
+    use secp256k1::{key::SecretKey};
 
-    use zcash_client_backend::proto::compact_formats::{
-        CompactBlock, CompactOutput, CompactSpend, CompactTx,
+    use zcash_client_backend::{
+        keys::{spending_key, derive_transparent_address_from_secret_key, derive_secret_key_from_seed},
+        proto::compact_formats::{
+            CompactBlock, CompactOutput, CompactSpend, CompactTx,
+        }
     };
 
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+        legacy::TransparentAddress,
         memo::MemoBytes,
         note_encryption::SaplingNoteEncryption,
         primitives::{Note, Nullifier, PaymentAddress},
         transaction::components::Amount,
         util::generate_random_rseed,
-        zip32::ExtendedFullViewingKey,
+        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    };
+
+    use crate::{
+        wallet::{
+            init::{init_accounts_table},
+        },
+        AccountId, WalletDB
+
     };
 
     use super::BlockDB;
@@ -697,6 +702,20 @@ mod tests {
         Network::TestNetwork
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap()
+    }
+
+    pub(crate) fn derive_test_keys_from_seed(seed: &[u8], account: AccountId) -> (ExtendedSpendingKey, SecretKey) {
+        let extsk = spending_key(seed, network().coin_type(), account);
+        let tsk = derive_secret_key_from_seed(&network(), seed, account, 0).unwrap();
+        (extsk, tsk)
+    }
+
+    pub(crate) fn init_test_accounts_table(db_data: &WalletDB<Network>) -> (ExtendedFullViewingKey, TransparentAddress) {
+        let (extsk, tsk) = derive_test_keys_from_seed(&[0u8;32], AccountId(0));
+        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let taddr = derive_transparent_address_from_secret_key(&tsk);
+        init_accounts_table(db_data, &[&extfvk], &[&taddr]).unwrap();
+        (extfvk, taddr)
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying

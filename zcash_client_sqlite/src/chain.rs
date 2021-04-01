@@ -71,7 +71,7 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         transaction::components::Amount,
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        zip32::{ExtendedSpendingKey},
     };
 
     use zcash_client_backend::data_api::WalletRead;
@@ -86,10 +86,11 @@ mod tests {
         tests::{
             self, fake_compact_block, fake_compact_block_spending, insert_into_cache,
             sapling_activation_height,
+            init_test_accounts_table,
         },
         wallet::{
             get_balance,
-            init::{init_accounts_table, init_wallet_db},
+            init::{init_wallet_db},
             rewind_to_height,
         },
         AccountId, BlockDB, NoteId, WalletDB,
@@ -106,9 +107,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Empty chain should be valid
         validate_chain(
@@ -187,9 +186,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
@@ -259,9 +256,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
@@ -331,9 +326,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Account balance should be zero
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
@@ -390,9 +383,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
         let value = Amount::from_u64(50000).unwrap();
@@ -451,9 +442,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Account balance should be zero
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
@@ -499,9 +488,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        init_accounts_table(&db_data, &[extfvk.clone()]).unwrap();
+        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Account balance should be zero
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), Amount::zero());
