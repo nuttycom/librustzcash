@@ -64,7 +64,7 @@ pub enum Error<NoteId> {
     MemoRequired,
 
     /// It is forbidden to provide a memo when constructing a transparent output.
-    MemoForbidden
+    MemoForbidden,
 }
 
 impl ChainInvalid {
