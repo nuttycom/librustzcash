@@ -63,6 +63,8 @@ pub mod chain;
 pub mod error;
 pub mod wallet;
 
+pub const PRUNING_HEIGHT: u32 = 100;
+
 /// A newtype wrapper for sqlite primary key values for the notes
 /// table.
 #[derive(Debug, Copy, Clone)]
@@ -448,7 +450,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             // Prune the stored witnesses (we only expect rollbacks of at most 100 blocks).
-            wallet::prune_witnesses(up, block.block_height - 100)?;
+            wallet::prune_witnesses(up, block.block_height - PRUNING_HEIGHT)?;
 
             // Update now-expired transactions that didn't get mined.
             wallet::update_expired_notes(up, block.block_height)?;

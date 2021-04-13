@@ -33,7 +33,7 @@ use zcash_client_backend::{
     DecryptedOutput,
 };
 
-use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb};
+use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb, PRUNING_HEIGHT};
 
 pub mod init;
 pub mod transact;
@@ -437,6 +437,22 @@ pub fn get_block_hash<P>(
         .optional()
 }
 
+/// Gets the height to which the database must be rewound if any rewind greater than the pruning
+/// height is attempted.
+pub fn get_rewind_height<P>(wdb: &WalletDb<P>) -> Result<Option<BlockHeight>, SqliteClientError> {
+    wdb.conn
+        .query_row(
+            "SELECT MIN(tx.block) 
+             FROM received_notes n
+             JOIN transactions tx ON tx.id_tx = n.tx
+             WHERE n.spent IS NULL",
+            NO_PARAMS,
+            |row| row.get(0).map(|h: u32| h.into()),
+        )
+        .optional()
+        .map_err(SqliteClientError::from)
+}
+
 /// Rewinds the database to the given height.
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
@@ -461,30 +477,46 @@ pub fn rewind_to_height<P: consensus::Parameters>(
                     .or(Ok(sapling_activation_height - 1))
             })?;
 
-    // nothing to do if we're deleting back down to the max height
-    if block_height >= last_scanned_height {
-        Ok(())
+    let rewind_height = if block_height >= (last_scanned_height - PRUNING_HEIGHT) {
+        Some(block_height)
     } else {
-        // Decrement witnesses.
-        wdb.conn.execute(
-            "DELETE FROM sapling_witnesses WHERE block > ?",
-            &[u32::from(block_height)],
-        )?;
+        match get_rewind_height(&wdb)? {
+            Some(h) => {
+                if block_height > h {
+                    return Err(SqliteClientError::RequestedRewindInvalid(h));
+                } else {
+                    Some(block_height)
+                }
+            }
+            None => Some(block_height),
+        }
+    };
 
-        // Un-mine transactions.
-        wdb.conn.execute(
-            "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
-            &[u32::from(block_height)],
-        )?;
+    // nothing to do if we're deleting back down to the max height
 
-        // Now that they aren't depended on, delete scanned blocks.
-        wdb.conn.execute(
-            "DELETE FROM blocks WHERE height > ?",
-            &[u32::from(block_height)],
-        )?;
+    if let Some(block_height) = rewind_height {
+        if block_height < last_scanned_height {
+            // Decrement witnesses.
+            wdb.conn.execute(
+                "DELETE FROM sapling_witnesses WHERE block > ?",
+                &[u32::from(block_height)],
+            )?;
 
-        Ok(())
+            // Un-mine transactions.
+            wdb.conn.execute(
+                "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block > ?",
+                &[u32::from(block_height)],
+            )?;
+
+            // Now that they aren't depended on, delete scanned blocks.
+            wdb.conn.execute(
+                "DELETE FROM blocks WHERE height > ?",
+                &[u32::from(block_height)],
+            )?;
+        }
     }
+
+    Ok(())
 }
 
 /// Returns the commitment tree for the block at the specified height,
