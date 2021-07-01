@@ -185,7 +185,7 @@ pub fn write_v5_bundle<W: Write>(
 
         write_flags(&mut writer, &bundle.flags())?;
         writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-        write_anchor(&mut writer, bundle.anchor())?;
+        writer.write_all(&bundle.anchor().to_bytes())?;
         Vector::write(
             &mut writer,
             bundle.authorization().proof().as_ref(),
@@ -255,10 +255,6 @@ pub fn write_flags<W: Write>(mut writer: W, flags: &Flags) -> io::Result<()> {
         byte |= FLAG_OUTPUTS_ENABLED;
     }
     writer.write_all(&[byte])
-}
-
-pub fn write_anchor<W: Write>(mut writer: W, anchor: &Anchor) -> io::Result<()> {
-    writer.write_all(&anchor.to_bytes())
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
