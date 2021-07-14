@@ -78,6 +78,7 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
     Ok(())
 }
 
+#[allow(clippy::redundant_closure)]
 pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<NonEmptyFrontier<H>> {
@@ -149,6 +150,7 @@ pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
     Ok(Position::from(reader.read_u64::<LittleEndian>()? as usize))
 }
 
+#[allow(clippy::redundant_closure)]
 pub fn read_auth_fragment_v1<H: HashSer, R: Read>(mut reader: R) -> io::Result<AuthFragment<H>> {
     let position = read_position(&mut reader)?;
     let alts_observed = reader.read_u64::<LittleEndian>()? as usize;
@@ -179,6 +181,7 @@ pub fn write_bridge_v1<H: HashSer, W: Write>(
     Ok(())
 }
 
+#[allow(clippy::redundant_closure)]
 pub fn read_bridge_v1<H: HashSer + Clone, R: Read>(mut reader: R) -> io::Result<MerkleBridge<H>> {
     let prior_position = Optional::read(&mut reader, |r| read_position(r))?;
     let auth_fragments = Vector::read(&mut reader, |r| {
@@ -255,6 +258,7 @@ pub fn write_tree_v1<H: HashSer + Hash + Eq, W: Write>(
     Ok(())
 }
 
+#[allow(clippy::redundant_closure)]
 pub fn read_tree_v1<H: Hashable + HashSer + Hash + Eq + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<BridgeTree<H, 32>> {
