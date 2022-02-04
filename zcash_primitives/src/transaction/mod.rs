@@ -941,23 +941,17 @@ pub struct TzeDigests<A> {
     pub signing_context: A,
 }
 
-#[cfg(feature = "zfuture")]
-pub trait TzeDigestsCtx {
-    fn update_hash_with_per_input_part();
-}
-
 pub trait TxDigestsCtx {
     type TransparentCtx;
 
+    fn transparent_ctx(c: &TxDigests<Self>) -> &Self::TransparentCtx;
+
     #[cfg(feature = "zfuture")]
-    type TzeCtx: TzeDigestsCtx;
+    type TzeCtx;
+
+    #[cfg(feature = "zfuture")]
+    fn tze_ctx(c: &TxDigests<Self>) -> &Self::TzeCtx;
 }
-
-#[cfg(feature = "zfuture")]
-impl TzeDigestsCtx for () {}
-
-#[cfg(feature = "zfuture")]
-impl TzeDigestsCtx for Blake2bHash {}
 
 impl TxDigestsCtx for () {
     type TransparentCtx = ();
