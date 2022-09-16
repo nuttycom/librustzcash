@@ -69,6 +69,10 @@ pub struct SpendDescriptionInfo {
     merkle_path: MerklePath<Node>,
 }
 
+#[cfg(feature = "zmail")]
+struct Attachment(Vec<u8>);
+
+
 #[derive(Clone)]
 struct SaplingOutput {
     /// `None` represents the `ovk = ⊥` case.
@@ -76,6 +80,8 @@ struct SaplingOutput {
     to: PaymentAddress,
     note: Note,
     memo: MemoBytes,
+    #[cfg(feature = "zmail")]
+    attachments: Vec<Attachment>,
 }
 
 impl SaplingOutput {
@@ -107,7 +113,26 @@ impl SaplingOutput {
             to,
             note,
             memo,
+            #[feature(zmail)]
+            attachments: vec![],
         })
+    }
+
+    #[cfg(feature = "zmail")]
+    fn new_internal_zmail<P: consensus::Parameters, R: RngCore>(
+        params: &P,
+        rng: &mut R,
+        target_height: BlockHeight,
+        ovk: Option<OutgoingViewingKey>,
+        to: PaymentAddress,
+        value: Amount,
+        attachments: Vec<Attachment>,
+    ) -> Result<Self, Error> {
+        // The output is initialized with empty memo bytes, as the memo will be constructed
+        // according to the zmail protocol.
+        let mut output = Self::new_internal(params, rng, target_height, ovk, to, value, MemoBytes::empty())?;
+        output.attachments = attachments;
+        Ok(output)
     }
 
     fn build<P: consensus::Parameters, Pr: TxProver, R: RngCore>(
@@ -268,7 +293,8 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         Ok(())
     }
 
-    /// Adds a Sapling address to send funds to.
+    /// Adds a Sapling recipient to the transaction. The note constructed will
+    /// be decryptable using the provided outgoing viewing key, if any.
     #[allow(clippy::too_many_arguments)]
     pub fn add_output<R: RngCore>(
         &mut self,
@@ -286,6 +312,34 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             to,
             value,
             memo,
+        )?;
+
+        self.value_balance -= value;
+
+        self.outputs.push(output);
+
+        Ok(())
+    }
+
+    /// Adds a Sapling recipient to the transaction 
+    #[cfg(feature = "zmail")]
+    #[allow(clippy::too_many_arguments)]
+    fn add_output_with_attachments<P: consensus::Parameters, R: RngCore>(
+        &mut self,
+        mut rng: R,
+        ovk: Option<OutgoingViewingKey>,
+        to: PaymentAddress,
+        value: Amount,
+        attachments: MemoBytes,
+    ) -> Result<(), Error> {
+        let output = SaplingOutput::new_internal_zmail(
+            &self.params,
+            &mut rng,
+            self.target_height,
+            ovk,
+            to,
+            value,
+            attachments
         )?;
 
         self.value_balance -= value;

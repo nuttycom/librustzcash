@@ -338,6 +338,14 @@ where
     }
 
     for payment in request.payments() {
+        #[cfg(feature = "zmail")]
+        let attachments = payment.other_params.filter_map(|(key, value)| 
+            if key == "zmail-ipfs" {
+            } else {
+                None
+            }
+        };
+
         match &payment.recipient_address {
             RecipientAddress::Unified(ua) => builder
                 .add_sapling_output(
