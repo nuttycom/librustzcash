@@ -36,6 +36,7 @@ and this library adheres to Rust's notion of
   - `JSDescription::net_value`
 - Added in `zcash_primitives::transaction::components::transparent`
   - `Bundle::value_balance`
+- Support for the `encrypt-to-recipient` feature for Sapling outputs.
 
 ### Changed
 - Migrated to `group 0.13`.

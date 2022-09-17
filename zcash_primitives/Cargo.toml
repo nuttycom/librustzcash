@@ -67,6 +67,7 @@ pprof = { version = "0.9", features = ["criterion", "flamegraph"] } # MSRV 1.56
 transparent-inputs = ["bs58", "hdwallet", "ripemd", "secp256k1"]
 test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
+encrypt-to-recipient = ["zcash_note_encryption/encrypt-to-recipient"]
 
 [lib]
 bench = false

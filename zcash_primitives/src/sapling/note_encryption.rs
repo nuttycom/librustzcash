@@ -27,6 +27,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "encrypt-to-recipient")]
+use zcash_note_encryption::PayloadEncryptionDomain;
+
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
 
@@ -68,10 +71,14 @@ fn sapling_ka_agree_prepared(esk: &PreparedScalar, pk_d: &PreparedBase) -> jubju
 /// Sapling KDF for note encryption.
 ///
 /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, ephemeral_key: &EphemeralKeyBytes) -> Blake2bHash {
+fn kdf_sapling(
+    personalization: &[u8; 16],
+    dhsecret: jubjub::SubgroupPoint,
+    ephemeral_key: &EphemeralKeyBytes,
+) -> Blake2bHash {
     Blake2bParams::new()
         .hash_length(32)
-        .personal(KDF_SAPLING_PERSONALIZATION)
+        .personal(personalization)
         .to_state()
         .update(&dhsecret.to_bytes())
         .update(ephemeral_key.as_ref())
@@ -213,7 +220,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     ///
     /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
     fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &EphemeralKeyBytes) -> Blake2bHash {
-        kdf_sapling(dhsecret, epk)
+        kdf_sapling(KDF_SAPLING_PERSONALIZATION, dhsecret, epk)
     }
 
     fn note_plaintext_bytes(
@@ -380,6 +387,28 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
     }
 }
 
+#[cfg(feature = "encrypt-to-recipient")]
+const SAPLING_ASSOC_KEY_KDF_PERS_PREFIX: &[u8; 8] = b"ZcashSAK";
+
+/// This implementation of `PayloadEncryptionDomain` permits the use of an 8-byte personalization
+/// suffix. The personalization prefix is fixed to `b"ZcashSAK"` to ensure that no collision with
+/// key personalization used for note encryption or with Orchard associated keys is possible.
+#[cfg(feature = "encrypt-to-recipient")]
+impl<P: consensus::Parameters> PayloadEncryptionDomain for SaplingDomain<P> {
+    type KdfPersonalization = [u8; 8];
+
+    fn kdf_personalized(
+        personalization: &Self::KdfPersonalization,
+        secret: Self::SharedSecret,
+        ephemeral_key: &EphemeralKeyBytes,
+    ) -> Self::SymmetricKey {
+        let mut sak_pers = [0u8; 16];
+        sak_pers[..8].copy_from_slice(SAPLING_ASSOC_KEY_KDF_PERS_PREFIX);
+        sak_pers[8..].copy_from_slice(personalization);
+        kdf_sapling(&sak_pers, secret, ephemeral_key)
+    }
+}
+
 /// Creates a new encryption context for the given note.
 ///
 /// Setting `ovk` to `None` represents the `ovk = ⊥` case, where the note cannot be
@@ -514,7 +543,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
         height,
     };
 
-    try_output_recovery_with_ock(&domain, ock, output, &output.out_ciphertext)
+    try_output_recovery_with_ock(&domain, ock, output)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -536,7 +565,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
         height,
     };
 
-    try_output_recovery_with_ovk(&domain, ovk, output, &output.cv, &output.out_ciphertext)
+    try_output_recovery_with_ovk(&domain, ovk, output)
 }
 
 #[cfg(test)]
@@ -560,6 +589,7 @@ mod tests {
         epk_bytes, kdf_sapling, prf_ock, sapling_ka_agree, sapling_note_encryption,
         try_sapling_compact_note_decryption, try_sapling_note_decryption,
         try_sapling_output_recovery, try_sapling_output_recovery_with_ock, SaplingDomain,
+        KDF_SAPLING_PERSONALIZATION,
     };
 
     use crate::{
@@ -692,7 +722,7 @@ mod tests {
         let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
         let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
-        let key = kdf_sapling(shared_secret, ephemeral_key);
+        let key = kdf_sapling(KDF_SAPLING_PERSONALIZATION, shared_secret, ephemeral_key);
 
         let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
         plaintext.copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
@@ -1404,7 +1434,7 @@ mod tests {
             let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
             assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
-            let k_enc = kdf_sapling(shared_secret, &ephemeral_key);
+            let k_enc = kdf_sapling(KDF_SAPLING_PERSONALIZATION, shared_secret, &ephemeral_key);
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);
