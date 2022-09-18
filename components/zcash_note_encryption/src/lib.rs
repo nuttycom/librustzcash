@@ -174,7 +174,7 @@ pub trait Domain {
     ///
     /// `ephemeral_key` is the byte encoding of the [`EphemeralPublicKey`] used to derive
     /// `secret`. During encryption it is derived via [`Self::epk_bytes`]; during trial
-    /// decryption it is obtained from [`ShieldedOutput::ephemeral_key`].
+    /// decryption it is obtained from [`KeyedOutput::ephemeral_key`].
     ///
     /// [`EphemeralPublicKey`]: Self::EphemeralPublicKey
     /// [`EphemeralSecretKey`]: Self::EphemeralSecretKey
@@ -361,7 +361,7 @@ pub trait PayloadEncryptionDomain: Domain {
     ///
     /// `ephemeral_key` is the byte encoding of the [`EphemeralPublicKey`] used to derive
     /// `secret`. During encryption it is derived via [`Self::epk_bytes`]; during trial
-    /// decryption it is obtained from [`ShieldedOutput::ephemeral_key`].
+    /// decryption it is obtained from [`KeyedOutput::ephemeral_key`].
     ///
     /// [`EphemeralPublicKey`]: Self::EphemeralPublicKey
     /// [`EphemeralSecretKey`]: Self::EphemeralSecretKey
