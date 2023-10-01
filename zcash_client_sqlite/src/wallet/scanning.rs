@@ -20,7 +20,7 @@ use crate::{
     PRUNING_DEPTH, VERIFY_LOOKAHEAD,
 };
 
-use super::wallet_birthday;
+use super::{scan_queue_extrema, wallet_birthday};
 
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
@@ -495,6 +495,72 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     )?;
 
     Ok(())
+}
+
+pub(crate) fn frontier_inserted(
+    conn: &rusqlite::Transaction<'_>,
+    frontier_block: BlockHeight,
+) -> Result<(), rusqlite::Error> {
+    // If `block_height` is greater than or equal to `stable_height`, we can rewrite any
+    // `ChainTip` ranges below `stable_height` to `OpenAdjacent` priority. This may cause some
+    // ranges within which a note has been previously found, but which existed within a `ChainTip`
+    // range to be deprioritized relative to other found notes.
+    match scan_queue_extrema(conn)?.map(|r| *r.end()) {
+        Some(chain_tip) if frontier_block + PRUNING_DEPTH > chain_tip => {
+            conn.execute(
+                "UPDATE scan_queue 
+                 SET priority = :open_adjacent_priority
+                 WHERE block_range_end < :block_height
+                 AND priority = :chain_tip_priority",
+                named_params! {
+                    ":open_adjacent_priority": priority_code(&ScanPriority::OpenAdjacent),
+                    ":chain_tip_priority": priority_code(&ScanPriority::ChainTip),
+                    ":block_height": u32::from(frontier_block)
+                },
+            )?;
+
+            // select all the ranges where end_height > frontier_height & rewrite them to make only
+            // `ChainTip` ranges
+            let existing_chain_tip_range_start = conn
+                .query_row(
+                    "SELECT MIN(block_range_start)
+                 FROM scan_queue
+                 WHERE block_range_end >= :block_height
+                 AND priority = :chain_tip_priority",
+                    named_params! {
+                        ":chain_tip_priority": priority_code(&ScanPriority::ChainTip),
+                        ":block_height": u32::from(frontier_block)
+                    },
+                    |row| row.get::<_, u32>(0).map(BlockHeight::from),
+                )
+                .optional()?;
+
+            // Even if we have a frontier, we require at a minimum `VERIFY_LOOKAHEAD` blocks
+            // to be scanned at `ChainTip` priority at the tip
+            let rewrite_max = chain_tip.saturating_sub(VERIFY_LOOKAHEAD);
+
+            let ranges: Vec<ScanRange> = existing_chain_tip_range_start
+                .filter(|start| start < &frontier_block)
+                .map(|start| {
+                    ScanRange::from_parts(
+                        start..min(frontier_block, rewrite_max),
+                        ScanPriority::OpenAdjacent,
+                    )
+                })
+                .into_iter()
+                .chain(
+                    Some(ScanRange::from_parts(
+                        min(frontier_block, rewrite_max)..chain_tip,
+                        ScanPriority::ChainTip,
+                    ))
+                    .into_iter(),
+                )
+                .collect();
+
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]

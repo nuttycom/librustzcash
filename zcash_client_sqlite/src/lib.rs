@@ -43,7 +43,7 @@ use std::{
     path::Path,
 };
 
-use incrementalmerkletree::Position;
+use incrementalmerkletree::{frontier::NonEmptyFrontier, Position, Retention};
 use shardtree::{
     error::{QueryError, ShardTreeError},
     ShardTree,
@@ -92,6 +92,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, get_checkpoint_depth, put_shard_roots},
+    scanning::frontier_inserted,
     SubtreeScanProgress,
 };
 
@@ -809,6 +810,18 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
             // calling this anyway.
             .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
     }
+
+    fn put_frontier(
+        &mut self,
+        block_height: BlockHeight,
+        frontier: NonEmptyFrontier<sapling::Node>,
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        todo!()
+    }
+}
+
+fn storage_error(e: rusqlite::Error) -> ShardTreeError<commitment_tree::Error> {
+    ShardTreeError::Storage(commitment_tree::Error::Query(e))
 }
 
 impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
@@ -829,7 +842,7 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
     {
         let mut shardtree = ShardTree::new(
             SqliteShardStore::from_connection(self.conn.0, SAPLING_TABLES_PREFIX)
-                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+                .map_err(storage_error)?,
             PRUNING_DEPTH.try_into().unwrap(),
         );
         let result = callback(&mut shardtree)?;
@@ -860,6 +873,37 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
             // the chain tip is unknown, but if that were the case we should never have been
             // calling this anyway.
             .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
+    }
+
+    fn put_frontier(
+        &mut self,
+        block_height: BlockHeight,
+        frontier: NonEmptyFrontier<sapling::Node>,
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        // If the specified block height is within the pruning depth, or if the chain tip is
+        // unknown, use checkpoint retention; otherwise use ephemeral retention.
+        let chain_tip_height = wallet::scan_queue_extrema(self.conn.0)
+            .map_err(storage_error)?
+            .map(|range| *range.end());
+        let retention = if chain_tip_height
+            .iter()
+            .all(|h| block_height + PRUNING_DEPTH >= *h)
+        {
+            Retention::Checkpoint {
+                id: block_height,
+                is_marked: false,
+            }
+        } else {
+            Retention::Ephemeral
+        };
+
+        // Insert the frontier data into the note commitment tree.
+        self.with_sapling_tree_mut(|t| t.insert_frontier_nodes(frontier.clone(), retention))?;
+
+        // Update the scanning queue so that scan ranges at the chain tip are shrunk to the blocks
+        // between the frontier and the chain tip.
+        frontier_inserted(self.conn.0, block_height)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))
     }
 }
 

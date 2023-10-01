@@ -7,7 +7,10 @@ use std::{
     num::{NonZeroU32, TryFromIntError},
 };
 
-use incrementalmerkletree::{frontier::Frontier, Retention};
+use incrementalmerkletree::{
+    frontier::{Frontier, NonEmptyFrontier},
+    Retention,
+};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
@@ -913,6 +916,12 @@ pub trait WalletCommitmentTrees {
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>;
 
+    fn put_frontier(
+        &mut self,
+        block_height: BlockHeight,
+        frontier: NonEmptyFrontier<sapling::Node>,
+    ) -> Result<(), ShardTreeError<Self::Error>>;
+
     /// Adds a sequence of note commitment tree subtree roots to the data store.
     fn put_sapling_subtree_roots(
         &mut self,
@@ -923,7 +932,7 @@ pub trait WalletCommitmentTrees {
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
-    use incrementalmerkletree::Address;
+    use incrementalmerkletree::{frontier::NonEmptyFrontier, Address};
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
@@ -1215,6 +1224,14 @@ pub mod testing {
                 Ok::<_, ShardTreeError<Self::Error>>(())
             })?;
 
+            Ok(())
+        }
+
+        fn put_frontier(
+            &mut self,
+            _block_height: BlockHeight,
+            _frontier: NonEmptyFrontier<sapling::Node>,
+        ) -> Result<(), ShardTreeError<Self::Error>> {
             Ok(())
         }
 
