@@ -708,6 +708,7 @@ pub(crate) fn get_wallet_summary(
             bal.sapling_balance.value_pending_spendability =
                 (bal.sapling_balance.value_pending_spendability + value_pending_spendability)
                     .expect("Value pending spendability cannot overflow");
+            bal.sapling_balance.unspent_note_count += 1;
         });
     }
 
@@ -738,7 +739,9 @@ pub(crate) fn get_wallet_summary(
             })?;
 
             account_balances.entry(account).and_modify(|bal| {
-                bal.unshielded = (bal.unshielded + value).expect("Unshielded value cannot overflow")
+                bal.unshielded =
+                    (bal.unshielded + value).expect("Unshielded value cannot overflow");
+                bal.utxo_count += 1;
             });
         }
     }

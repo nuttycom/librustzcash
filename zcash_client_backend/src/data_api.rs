@@ -71,6 +71,9 @@ pub struct Balance {
     /// confirmations to be spendable, or for which witnesses cannot yet be constructed without
     /// additional scanning.
     pub value_pending_spendability: NonNegativeAmount,
+
+    /// The number of unspent notes in the wallet.
+    pub unspent_note_count: usize,
 }
 
 impl Balance {
@@ -79,6 +82,7 @@ impl Balance {
         spendable_value: NonNegativeAmount::ZERO,
         change_pending_confirmation: NonNegativeAmount::ZERO,
         value_pending_spendability: NonNegativeAmount::ZERO,
+        unspent_note_count: 0,
     };
 
     /// Returns the total value of funds represented by this [`Balance`].
@@ -103,6 +107,9 @@ pub struct AccountBalance {
     /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
     /// subject to normal confirmation rules.
     pub unshielded: NonNegativeAmount,
+
+    /// The number of unspent transparent outputs in the wallet.
+    pub utxo_count: usize,
 }
 
 impl AccountBalance {
@@ -110,6 +117,7 @@ impl AccountBalance {
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
         unshielded: NonNegativeAmount::ZERO,
+        utxo_count: 0,
     };
 
     /// Returns the total value of funds belonging to the account.

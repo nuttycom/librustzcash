@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::Balance::unspent_note_count`
+- `zcash_client_backend::data_api::AccountBalance::utxo_count`
+
 ### Changed
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` now returns
   a `ScanSummary` containing metadata about the scanned blocks on success.
