@@ -87,13 +87,16 @@ impl error::Error for Error {
     }
 }
 
-pub struct SqliteShardStore<C, H, const SHARD_HEIGHT: u8> {
+pub struct SqliteShardStore<C, H, CheckpointId, const SHARD_HEIGHT: u8> {
     pub(crate) conn: C,
     table_prefix: &'static str,
+    ensured_retained_cache: BTreeSet<CheckpointId>,
     _hash_type: PhantomData<H>,
 }
 
-impl<C, H, const SHARD_HEIGHT: u8> SqliteShardStore<C, H, SHARD_HEIGHT> {
+impl<C, H, CheckpointId, const SHARD_HEIGHT: u8>
+    SqliteShardStore<C, H, CheckpointId, SHARD_HEIGHT>
+{
     const SHARD_ROOT_LEVEL: Level = Level::new(SHARD_HEIGHT);
 
     pub(crate) fn from_connection(
@@ -103,13 +106,14 @@ impl<C, H, const SHARD_HEIGHT: u8> SqliteShardStore<C, H, SHARD_HEIGHT> {
         Ok(SqliteShardStore {
             conn,
             table_prefix,
+            ensured_retained_cache: BTreeSet::new(),
             _hash_type: PhantomData,
         })
     }
 }
 
 impl<'conn, 'a: 'conn, H: HashSer, const SHARD_HEIGHT: u8> ShardStore
-    for SqliteShardStore<&'a rusqlite::Transaction<'conn>, H, SHARD_HEIGHT>
+    for SqliteShardStore<&'a rusqlite::Transaction<'conn>, H, BlockHeight, SHARD_HEIGHT>
 {
     type H = H;
     type CheckpointId = BlockHeight;
@@ -162,6 +166,19 @@ impl<'conn, 'a: 'conn, H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         add_checkpoint(self.conn, self.table_prefix, checkpoint_id, checkpoint)
     }
 
+    fn ensure_retained(&mut self, checkpoint_id: Self::CheckpointId) -> Result<(), Self::Error> {
+        self.ensured_retained_cache.insert(checkpoint_id);
+        Ok(())
+    }
+
+    fn ensured_retained_count(&self) -> Result<usize, Self::Error> {
+        Ok(self.ensured_retained_cache.len())
+    }
+
+    fn should_retain(&self, cid: &Self::CheckpointId) -> Result<bool, Self::Error> {
+        Ok(self.ensured_retained_cache.contains(cid))
+    }
+
     fn checkpoint_count(&self) -> Result<usize, Self::Error> {
         checkpoint_count(self.conn, self.table_prefix)
     }
@@ -181,7 +198,7 @@ impl<'conn, 'a: 'conn, H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         get_checkpoint(self.conn, self.table_prefix, *checkpoint_id)
     }
 
-    fn with_checkpoints<F>(&mut self, limit: usize, callback: F) -> Result<(), Self::Error>
+    fn with_checkpoints<F>(&self, limit: usize, callback: F) -> Result<(), Self::Error>
     where
         F: FnMut(&Self::CheckpointId, &Checkpoint) -> Result<(), Self::Error>,
     {
@@ -211,8 +228,9 @@ impl<'conn, 'a: 'conn, H: HashSer, const SHARD_HEIGHT: u8> ShardStore
     }
 }
 
+#[cfg(test)]
 impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
-    for SqliteShardStore<rusqlite::Connection, H, SHARD_HEIGHT>
+    for SqliteShardStore<rusqlite::Connection, H, BlockHeight, SHARD_HEIGHT>
 {
     type H = H;
     type CheckpointId = BlockHeight;
@@ -270,6 +288,19 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         tx.commit().map_err(Error::Query)
     }
 
+    fn ensure_retained(&mut self, checkpoint_id: Self::CheckpointId) -> Result<(), Self::Error> {
+        self.ensured_retained_cache.insert(checkpoint_id);
+        Ok(())
+    }
+
+    fn ensured_retained_count(&self) -> Result<usize, Self::Error> {
+        Ok(self.ensured_retained_cache.len())
+    }
+
+    fn should_retain(&self, cid: &Self::CheckpointId) -> Result<bool, Self::Error> {
+        Ok(self.ensured_retained_cache.contains(cid))
+    }
+
     fn checkpoint_count(&self) -> Result<usize, Self::Error> {
         checkpoint_count(&self.conn, self.table_prefix)
     }
@@ -289,11 +320,11 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         get_checkpoint(&self.conn, self.table_prefix, *checkpoint_id)
     }
 
-    fn with_checkpoints<F>(&mut self, limit: usize, callback: F) -> Result<(), Self::Error>
+    fn with_checkpoints<F>(&self, limit: usize, callback: F) -> Result<(), Self::Error>
     where
         F: FnMut(&Self::CheckpointId, &Checkpoint) -> Result<(), Self::Error>,
     {
-        let tx = self.conn.transaction().map_err(Error::Query)?;
+        let tx = self.conn.unchecked_transaction().map_err(Error::Query)?;
         with_checkpoints(&tx, self.table_prefix, limit, callback)?;
         tx.commit().map_err(Error::Query)
     }
@@ -1077,6 +1108,7 @@ pub(crate) fn put_shard_roots<
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
     use tempfile::NamedTempFile;
 
     use incrementalmerkletree::{
@@ -1093,15 +1125,24 @@ mod tests {
     use super::SqliteShardStore;
     use crate::{wallet::init::init_wallet_db, WalletDb, SAPLING_TABLES_PREFIX};
 
-    fn new_tree(m: usize) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
+    fn new_test_wallet_db() -> WalletDb<Connection, Network> {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();
-        let store =
-            SqliteShardStore::<_, String, 3>::from_connection(db_data.conn, SAPLING_TABLES_PREFIX)
-                .unwrap();
+        db_data
+    }
+
+    fn new_tree(
+        m: usize,
+    ) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, BlockHeight, 3>, 4, 3> {
+        let db_data = new_test_wallet_db();
+        let store = SqliteShardStore::<_, String, BlockHeight, 3>::from_connection(
+            db_data.conn,
+            SAPLING_TABLES_PREFIX,
+        )
+        .unwrap();
         ShardTree::new(store, m)
     }
 
@@ -1142,14 +1183,13 @@ mod tests {
 
     #[test]
     fn put_shard_roots() {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        data_file.keep().unwrap();
-
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut db_data = new_test_wallet_db();
         let tx = db_data.conn.transaction().unwrap();
-        let store =
-            SqliteShardStore::<_, String, 3>::from_connection(&tx, SAPLING_TABLES_PREFIX).unwrap();
+        let store = SqliteShardStore::<_, String, BlockHeight, 3>::from_connection(
+            &tx,
+            SAPLING_TABLES_PREFIX,
+        )
+        .unwrap();
 
         // introduce some roots
         let roots = (0u32..4)

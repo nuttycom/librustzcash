@@ -813,8 +813,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
 impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Connection, P> {
     type Error = commitment_tree::Error;
-    type SaplingShardStore<'a> =
-        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+    type SaplingShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        sapling::Node,
+        BlockHeight,
+        SAPLING_SHARD_HEIGHT,
+    >;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
@@ -867,6 +871,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     type OrchardShardStore<'a> = SqliteShardStore<
         &'a rusqlite::Transaction<'a>,
         orchard::tree::MerkleHashOrchard,
+        BlockHeight,
         ORCHARD_SHARD_HEIGHT,
     >;
 
@@ -897,8 +902,12 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
 
 impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
     type Error = commitment_tree::Error;
-    type SaplingShardStore<'a> =
-        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+    type SaplingShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        sapling::Node,
+        BlockHeight,
+        SAPLING_SHARD_HEIGHT,
+    >;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
@@ -938,6 +947,7 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
     type OrchardShardStore<'a> = SqliteShardStore<
         &'a rusqlite::Transaction<'a>,
         orchard::tree::MerkleHashOrchard,
+        BlockHeight,
         ORCHARD_SHARD_HEIGHT,
     >;
 

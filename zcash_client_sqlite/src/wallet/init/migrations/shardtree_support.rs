@@ -103,7 +103,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let block_height_extrema = block_height_extrema(transaction)?;
 
         let shard_store =
-            SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+            SqliteShardStore::<_, sapling::Node, BlockHeight, SAPLING_SHARD_HEIGHT>::from_connection(
                 transaction,
                 SAPLING_TABLES_PREFIX,
             )?;

@@ -118,3 +118,7 @@ zip32 = "0.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+shardtree = { git = "https://github.com/nuttycom/incrementalmerkletree.git", rev = "50429843cef17a04fe146515836ac4986c4e57a9" }
+incrementalmerkletree = { git = "https://github.com/nuttycom/incrementalmerkletree.git", rev = "50429843cef17a04fe146515836ac4986c4e57a9" }

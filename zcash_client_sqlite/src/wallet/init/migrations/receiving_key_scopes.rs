@@ -136,7 +136,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         // In the case that we don't have the raw transaction
         let mut commitment_tree = ShardTree::new(
-            SqliteShardStore::<_, _, SAPLING_SHARD_HEIGHT>::from_connection(
+            SqliteShardStore::<_, _, BlockHeight, SAPLING_SHARD_HEIGHT>::from_connection(
                 transaction,
                 SAPLING_TABLES_PREFIX,
             )?,

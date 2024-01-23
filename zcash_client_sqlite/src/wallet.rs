@@ -202,7 +202,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     if let Some(frontier) = birthday.sapling_frontier().value() {
         debug!("Inserting frontier into ShardTree: {:?}", frontier);
         let shard_store =
-            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+            SqliteShardStore::<_, ::sapling::Node, BlockHeight, SAPLING_SHARD_HEIGHT>::from_connection(
                 conn,
                 SAPLING_TABLES_PREFIX,
             )?;
@@ -770,7 +770,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     let next_sapling_subtree_index = {
         let shard_store =
-            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+            SqliteShardStore::<_, ::sapling::Node, BlockHeight, SAPLING_SHARD_HEIGHT>::from_connection(
                 tx,
                 SAPLING_TABLES_PREFIX,
             )?;

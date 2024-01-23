@@ -26,6 +26,13 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::error::SqliteClientError` has new error variants:
   - `SqliteClientError::UnsupportedPoolType`
   - `SqliteClientError::BalanceError`
+- `zcash_client_sqlite::SqliteShardStore` has an additional `CheckpointId`
+  type parameter.
+
+### Removed
+- `impl ShardStore for SqliteShardStore<rusqlite::Connection, ...>` has been
+  removed from the public API; it was only used for tests and was impacted by
+  changes to the type of `ShardStore::with_checkpoints`.
 
 ## [0.8.1] - 2023-10-18
 
