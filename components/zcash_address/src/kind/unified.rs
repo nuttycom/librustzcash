@@ -24,7 +24,7 @@ const PADDING_LEN: usize = 16;
 /// The typecodes `0xFFFA..=0xFFFF` reserved for experiments are currently not
 /// distinguished from unknown values, and will be parsed as [`Typecode::Unknown`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Typecode {
+pub enum DataTypecode {
     /// A transparent P2PKH address, FVK, or IVK encoding as specified in [ZIP 316](https://zips.z.cash/zip-0316).
     P2pkh,
     /// A transparent P2SH address.
@@ -39,7 +39,34 @@ pub enum Typecode {
     Unknown(u32),
 }
 
-impl Typecode {
+impl TryFrom<u32> for DataTypecode {
+    type Error = ();
+
+    fn try_from(typecode: u32) -> Result<Self, Self::Error> {
+        match typecode {
+            0x00 => Ok(DataTypecode::P2pkh),
+            0x01 => Ok(DataTypecode::P2sh),
+            0x02 => Ok(DataTypecode::Sapling),
+            0x03 => Ok(DataTypecode::Orchard),
+            0x04..=0xDF | 0xFD..=0x02000000 => Ok(DataTypecode::Unknown(typecode)),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<DataTypecode> for u32 {
+    fn from(t: DataTypecode) -> Self {
+        match t {
+            DataTypecode::P2pkh => 0x00,
+            DataTypecode::P2sh => 0x01,
+            DataTypecode::Sapling => 0x02,
+            DataTypecode::Orchard => 0x03,
+            DataTypecode::Unknown(typecode) => typecode,
+        }
+    }
+}
+
+impl DataTypecode {
     pub fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
         match (a, b) {
             // Trivial equality checks.
@@ -69,9 +96,69 @@ impl Typecode {
             (_, Self::P2pkh) => cmp::Ordering::Greater,
         }
     }
+}
+
+/// The known Metadata Typecodes
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MetadataTypecode {
+    /// Expiration height metadata as specified in [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
+    ExpiryHeight,
+    /// Expiration height metadata as specified in [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
+    ExpiryTime,
+    /// An unknown MUST-underatand metadata item as specified in [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
+    /// A parser encountering this typecode must halt with an error.
+    MustUnderstand(u32),
+    /// An unknown metadata item as specified in [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
+    Unknown(u32),
+}
+
+impl TryFrom<u32> for MetadataTypecode {
+    type Error = ();
+
+    fn try_from(typecode: u32) -> Result<Self, Self::Error> {
+        match typecode {
+            0xE0 => Ok(MetadataTypecode::ExpiryHeight),
+            0xE1 => Ok(MetadataTypecode::ExpiryTime),
+            0xE2..=0xEF => Ok(MetadataTypecode::MustUnderstand(typecode)),
+            0xF0..=0xFC => Ok(MetadataTypecode::Unknown(typecode)),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<MetadataTypecode> for u32 {
+    fn from(t: MetadataTypecode) -> Self {
+        match t {
+            MetadataTypecode::ExpiryHeight => 0xE0,
+            MetadataTypecode::ExpiryTime => 0xE1,
+            MetadataTypecode::MustUnderstand(value) => value,
+            MetadataTypecode::Unknown(value) => value,
+        }
+    }
+}
+
+/// An enumeration of the Unified Address Item Typecodes.
+///
+/// Unified Address Items are partitioned into two sets: key-type items, which include
+/// receivers and viewing keys, and metadata items
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Typecode {
+    Data(DataTypecode),
+    Metadata(MetadataTypecode),
+}
+
+impl Typecode {
+    pub const P2PKH: Typecode = Typecode::Data(DataTypecode::P2pkh);
+    pub const P2SH: Typecode = Typecode::Data(DataTypecode::P2sh);
+    pub const SAPLING: Typecode = Typecode::Data(DataTypecode::Sapling);
+    pub const ORCHARD: Typecode = Typecode::Data(DataTypecode::Orchard);
 
     pub fn encoding_order(a: &Self, b: &Self) -> cmp::Ordering {
         u32::from(*a).cmp(&u32::from(*b))
+    }
+
+    pub fn is_transparent_data_item(&self) -> bool {
+        *self == Self::P2PKH || *self == Self::P2SH
     }
 }
 
@@ -79,41 +166,108 @@ impl TryFrom<u32> for Typecode {
     type Error = ParseError;
 
     fn try_from(typecode: u32) -> Result<Self, Self::Error> {
-        match typecode {
-            0x00 => Ok(Typecode::P2pkh),
-            0x01 => Ok(Typecode::P2sh),
-            0x02 => Ok(Typecode::Sapling),
-            0x03 => Ok(Typecode::Orchard),
-            0x04..=0x02000000 => Ok(Typecode::Unknown(typecode)),
-            0x02000001..=u32::MAX => Err(ParseError::InvalidTypecodeValue(typecode as u64)),
-        }
+        DataTypecode::try_from(typecode)
+            .map_or_else(
+                |()| MetadataTypecode::try_from(typecode).map(Typecode::Metadata),
+                |t| Ok(Typecode::Data(t)),
+            )
+            .map_err(|()| ParseError::InvalidTypecodeValue(typecode as u64))
     }
 }
 
 impl From<Typecode> for u32 {
     fn from(t: Typecode) -> Self {
         match t {
-            Typecode::P2pkh => 0x00,
-            Typecode::P2sh => 0x01,
-            Typecode::Sapling => 0x02,
-            Typecode::Orchard => 0x03,
-            Typecode::Unknown(typecode) => typecode,
+            Typecode::Data(tc) => tc.into(),
+            Typecode::Metadata(tc) => tc.into(),
         }
     }
 }
 
 impl TryFrom<Typecode> for usize {
     type Error = TryFromIntError;
+
     fn try_from(t: Typecode) -> Result<Self, Self::Error> {
         u32::from(t).try_into()
     }
 }
 
-impl Typecode {
-    fn is_transparent(&self) -> bool {
-        // Unknown typecodes are treated as not transparent for the purpose of disallowing
-        // only-transparent UAs, which can be represented with existing address encodings.
-        matches!(self, Typecode::P2pkh | Typecode::P2sh)
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MetadataItem {
+    ExpiryHeight(u32),
+    ExpiryTime(u64),
+    Unknown { typecode: u32, data: Vec<u8> },
+}
+
+impl MetadataItem {
+    pub fn parse(typecode: MetadataTypecode, data: &[u8]) -> Result<Self, ParseError> {
+        match typecode {
+            MetadataTypecode::ExpiryHeight => data
+                .try_into()
+                .map(u32::from_le_bytes)
+                .map(MetadataItem::ExpiryHeight)
+                .map_err(|_| {
+                    ParseError::InvalidEncoding(
+                        "Expiry height must be a 32-bit little-endian value.".to_string(),
+                    )
+                }),
+            MetadataTypecode::ExpiryTime => data
+                .try_into()
+                .map(u64::from_le_bytes)
+                .map(MetadataItem::ExpiryTime)
+                .map_err(|_| {
+                    ParseError::InvalidEncoding(
+                        "Expiry time must be a 64-bit little-endian value.".to_string(),
+                    )
+                }),
+            MetadataTypecode::MustUnderstand(tc) => Err(ParseError::NotUnderstood(tc)),
+            MetadataTypecode::Unknown(typecode) => Ok(MetadataItem::Unknown {
+                typecode,
+                data: data.to_vec(),
+            }),
+        }
+    }
+
+    pub fn typecode(&self) -> MetadataTypecode {
+        match self {
+            MetadataItem::ExpiryHeight(_) => MetadataTypecode::ExpiryHeight,
+            MetadataItem::ExpiryTime(_) => MetadataTypecode::ExpiryTime,
+            MetadataItem::Unknown { typecode, .. } => MetadataTypecode::Unknown(*typecode),
+        }
+    }
+
+    pub fn data(&self) -> Vec<u8> {
+        match self {
+            MetadataItem::ExpiryHeight(h) => h.to_le_bytes().to_vec(),
+            MetadataItem::ExpiryTime(t) => t.to_le_bytes().to_vec(),
+            MetadataItem::Unknown { data, .. } => data.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Item<T> {
+    Data(T),
+    Metadata(MetadataItem),
+}
+
+impl<T: private::SealedDataItem> Item<T> {
+    pub fn typecode(&self) -> Typecode {
+        match self {
+            Item::Data(d) => Typecode::Data(d.typecode()),
+            Item::Metadata(m) => Typecode::Metadata(m.typecode()),
+        }
+    }
+
+    pub fn encoding_order(a: &Self, b: &Self) -> cmp::Ordering {
+        Typecode::encoding_order(&a.typecode(), &b.typecode())
+    }
+
+    pub fn data(&self) -> Vec<u8> {
+        match self {
+            Item::Data(d) => d.data().to_vec(),
+            Item::Metadata(m) => m.data(),
+        }
     }
 }
 
@@ -136,6 +290,8 @@ pub enum ParseError {
     NotUnified,
     /// The Bech32m string has an unrecognized human-readable prefix.
     UnknownPrefix(String),
+    /// A `MUST-understand` metadata item was not recognized.
+    NotUnderstood(u32),
 }
 
 impl fmt::Display for ParseError {
@@ -151,6 +307,13 @@ impl fmt::Display for ParseError {
             ParseError::UnknownPrefix(s) => {
                 write!(f, "Unrecognized Bech32m human-readable prefix: {}", s)
             }
+            ParseError::NotUnderstood(tc) => {
+                write!(
+                    f,
+                    "MUST-understand metadata item with typecode {} was not recognized; please upgrade.",
+                    tc
+                )
+            }
         }
     }
 }
@@ -158,33 +321,22 @@ impl fmt::Display for ParseError {
 impl Error for ParseError {}
 
 pub(crate) mod private {
-    use super::{ParseError, Typecode, PADDING_LEN};
-    use crate::Network;
+    use super::{DataTypecode, ParseError, Typecode, PADDING_LEN};
+    use crate::{
+        unified::{Item, MetadataItem},
+        Network,
+    };
     use std::{
-        cmp,
         convert::{TryFrom, TryInto},
         io::Write,
     };
     use zcash_encoding::CompactSize;
 
     /// A raw address or viewing key.
-    pub trait SealedItem: for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + Clone {
-        fn typecode(&self) -> Typecode;
+    pub trait SealedDataItem: Clone {
+        fn parse(tc: DataTypecode, value: &[u8]) -> Result<Self, ParseError>;
+        fn typecode(&self) -> DataTypecode;
         fn data(&self) -> &[u8];
-
-        fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
-            match Typecode::preference_order(&a.typecode(), &b.typecode()) {
-                cmp::Ordering::Equal => a.data().cmp(b.data()),
-                res => res,
-            }
-        }
-
-        fn encoding_order(a: &Self, b: &Self) -> cmp::Ordering {
-            match Typecode::encoding_order(&a.typecode(), &b.typecode()) {
-                cmp::Ordering::Equal => a.data().cmp(b.data()),
-                res => res,
-            }
-        }
     }
 
     /// A Unified Container containing addresses or viewing keys.
@@ -196,7 +348,7 @@ pub(crate) mod private {
         /// Implementations of this method should act as unchecked constructors
         /// of the container type; the caller is guaranteed to check the
         /// general invariants that apply to all unified containers.
-        fn from_inner(items: Vec<Self::Item>) -> Self;
+        fn from_inner(items: Vec<Item<Self::DataItem>>) -> Self;
 
         fn network_hrp(network: &Network) -> &'static str {
             match network {
@@ -227,7 +379,7 @@ pub(crate) mod private {
                 )
                 .unwrap();
                 CompactSize::write(&mut writer, data.len()).unwrap();
-                writer.write_all(data).unwrap();
+                writer.write_all(&data).unwrap();
             }
         }
 
@@ -248,10 +400,13 @@ pub(crate) mod private {
         }
 
         /// Parse the items of the unified container.
-        fn parse_items<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Vec<Self::Item>, ParseError> {
-            fn read_receiver<R: SealedItem>(
+        fn parse_items<T: Into<Vec<u8>>>(
+            hrp: &str,
+            buf: T,
+        ) -> Result<Vec<Item<Self::DataItem>>, ParseError> {
+            fn read_receiver<R: SealedDataItem>(
                 mut cursor: &mut std::io::Cursor<&[u8]>,
-            ) -> Result<R, ParseError> {
+            ) -> Result<Item<R>, ParseError> {
                 let typecode = CompactSize::read(&mut cursor)
                     .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
                     .map_err(|e| {
@@ -279,12 +434,13 @@ pub(crate) mod private {
                         length
                     )));
                 }
-                let result = R::try_from((
-                    typecode,
-                    &buf[cursor.position() as usize..addr_end as usize],
-                ));
+                let data = &buf[cursor.position() as usize..addr_end as usize];
+                let result = match Typecode::try_from(typecode)? {
+                    Typecode::Data(tc) => Item::Data(R::parse(tc, data)?),
+                    Typecode::Metadata(tc) => Item::Metadata(MetadataItem::parse(tc, data)?),
+                };
                 cursor.set_position(addr_end);
-                result
+                Ok(result)
             }
 
             // Here we allocate if necessary to get a mutable Vec<u8> to unjumble.
@@ -320,8 +476,8 @@ pub(crate) mod private {
 
         /// A private function that constructs a unified container with the
         /// specified items, which must be in ascending typecode order.
-        fn try_from_items_internal(items: Vec<Self::Item>) -> Result<Self, ParseError> {
-            assert!(u32::from(Typecode::P2sh) == u32::from(Typecode::P2pkh) + 1);
+        fn try_from_items_internal(items: Vec<Item<Self::DataItem>>) -> Result<Self, ParseError> {
+            assert!(u32::from(Typecode::P2SH) == u32::from(Typecode::P2PKH) + 1);
 
             let mut only_transparent = true;
             let mut prev_code = None; // less than any Some
@@ -332,13 +488,15 @@ pub(crate) mod private {
                     return Err(ParseError::InvalidTypecodeOrder);
                 } else if t_code == prev_code {
                     return Err(ParseError::DuplicateTypecode(t));
-                } else if t == Typecode::P2sh && prev_code == Some(u32::from(Typecode::P2pkh)) {
+                } else if t == Typecode::Data(DataTypecode::P2sh)
+                    && prev_code == Some(u32::from(DataTypecode::P2pkh))
+                {
                     // P2pkh and P2sh can only be in that order and next to each other,
                     // otherwise we would detect an out-of-order or duplicate typecode.
                     return Err(ParseError::BothP2phkAndP2sh);
                 } else {
                     prev_code = t_code;
-                    only_transparent = only_transparent && t.is_transparent();
+                    only_transparent = only_transparent && t.is_transparent_data_item();
                 }
             }
 
@@ -356,7 +514,7 @@ pub(crate) mod private {
     }
 }
 
-use private::SealedItem;
+use private::SealedDataItem;
 
 /// Trait providing common encoding and decoding logic for Unified containers.
 pub trait Encoding: private::SealedContainer {
@@ -370,8 +528,8 @@ pub trait Encoding: private::SealedContainer {
     /// * the item list may not contain two items having the same typecode
     /// * the item list may not contain only transparent items (or no items)
     /// * the item list may not contain both P2PKH and P2SH items.
-    fn try_from_items(mut items: Vec<Self::Item>) -> Result<Self, ParseError> {
-        items.sort_unstable_by(Self::Item::encoding_order);
+    fn try_from_items(mut items: Vec<Item<Self::DataItem>>) -> Result<Self, ParseError> {
+        items.sort_unstable_by(Item::encoding_order);
         Self::try_from_items_internal(items)
     }
 
@@ -412,19 +570,10 @@ pub trait Encoding: private::SealedContainer {
 /// Trait for for Unified containers, that exposes the items within them.
 pub trait Container {
     /// The type of item in this unified container.
-    type Item: SealedItem;
-
-    /// Returns the items contained within this container, sorted in preference order.
-    fn items(&self) -> Vec<Self::Item> {
-        let mut items = self.items_as_parsed().to_vec();
-        // Unstable sorting is fine, because all items are guaranteed by construction
-        // to have distinct typecodes.
-        items.sort_unstable_by(Self::Item::preference_order);
-        items
-    }
+    type DataItem: SealedDataItem;
 
     /// Returns the items in the order they were parsed from the string encoding.
     ///
     /// This API is for advanced usage; in most cases you should use `Self::items`.
-    fn items_as_parsed(&self) -> &[Self::Item];
+    fn items_as_parsed(&self) -> &[Item<Self::DataItem>];
 }

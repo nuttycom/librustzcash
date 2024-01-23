@@ -1,6 +1,6 @@
-use super::{private::SealedItem, ParseError, Typecode};
+use super::{private::SealedDataItem, DataTypecode, Item, ParseError};
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 
 /// The set of known Receivers for Unified Addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -12,34 +12,33 @@ pub enum Receiver {
     Unknown { typecode: u32, data: Vec<u8> },
 }
 
-impl TryFrom<(u32, &[u8])> for Receiver {
-    type Error = ParseError;
-
-    fn try_from((typecode, addr): (u32, &[u8])) -> Result<Self, Self::Error> {
-        match typecode.try_into()? {
-            Typecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
-            Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
-            Typecode::Sapling => addr.try_into().map(Receiver::Sapling),
-            Typecode::Orchard => addr.try_into().map(Receiver::Orchard),
-            Typecode::Unknown(_) => Ok(Receiver::Unknown {
+impl SealedDataItem for Receiver {
+    fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
+        match typecode {
+            DataTypecode::P2pkh => data.try_into().map(Receiver::P2pkh),
+            DataTypecode::P2sh => data.try_into().map(Receiver::P2sh),
+            DataTypecode::Sapling => data.try_into().map(Receiver::Sapling),
+            DataTypecode::Orchard => data.try_into().map(Receiver::Orchard),
+            DataTypecode::Unknown(typecode) => Ok(Receiver::Unknown {
                 typecode,
-                data: addr.to_vec(),
+                data: data.to_vec(),
             }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid address for typecode {}: {}", typecode, e))
+            ParseError::InvalidEncoding(format!(
+                "Invalid address for typecode {:?}: {:?}",
+                typecode, e
+            ))
         })
     }
-}
 
-impl SealedItem for Receiver {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Receiver::P2pkh(_) => Typecode::P2pkh,
-            Receiver::P2sh(_) => Typecode::P2sh,
-            Receiver::Sapling(_) => Typecode::Sapling,
-            Receiver::Orchard(_) => Typecode::Orchard,
-            Receiver::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
+            Receiver::P2pkh(_) => DataTypecode::P2pkh,
+            Receiver::P2sh(_) => DataTypecode::P2sh,
+            Receiver::Sapling(_) => DataTypecode::Sapling,
+            Receiver::Orchard(_) => DataTypecode::Orchard,
+            Receiver::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -90,7 +89,7 @@ impl SealedItem for Receiver {
 ///
 /// // We can obtain the receivers for the UA in preference order
 /// // (the order in which wallets should prefer to use them):
-/// let receivers: Vec<unified::Receiver> = ua.items();
+/// let receivers: Vec<unified::Receiver> = ua.receivers();
 ///
 /// // And we can create the UA from a list of receivers:
 /// let new_ua = unified::Address::try_from_items(receivers)?;
@@ -99,7 +98,24 @@ impl SealedItem for Receiver {
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Address(pub(crate) Vec<Receiver>);
+pub struct Address(pub(crate) Vec<Item<Receiver>>);
+
+impl Address {
+    /// Returns the receivers for this address, in preference order.
+    pub fn receivers(&self) -> Vec<Receiver> {
+        let mut result = self
+            .0
+            .iter()
+            .filter_map(|item| match item {
+                Item::Data(r) => Some(r.clone()),
+                Item::Metadata(_) => None,
+            })
+            .collect::<Vec<Receiver>>();
+        result
+            .sort_unstable_by(|a, b| DataTypecode::preference_order(&a.typecode(), &b.typecode()));
+        result
+    }
+}
 
 impl super::private::SealedContainer for Address {
     /// The HRP for a Bech32m-encoded mainnet Unified Address.
@@ -119,16 +135,16 @@ impl super::private::SealedContainer for Address {
     /// The HRP for a Bech32m-encoded regtest Unified Address.
     const REGTEST: &'static str = "uregtest";
 
-    fn from_inner(receivers: Vec<Self::Item>) -> Self {
+    fn from_inner(receivers: Vec<Item<Self::DataItem>>) -> Self {
         Self(receivers)
     }
 }
 
 impl super::Encoding for Address {}
 impl super::Container for Address {
-    type Item = Receiver;
+    type DataItem = Receiver;
 
-    fn items_as_parsed(&self) -> &[Receiver] {
+    fn items_as_parsed(&self) -> &[Item<Receiver>] {
         &self.0
     }
 }
@@ -143,6 +159,7 @@ mod tests {
 
     use crate::{
         kind::unified::{private::SealedContainer, Container, Encoding},
+        unified::Item,
         Network,
     };
 
@@ -358,18 +375,18 @@ mod tests {
     fn receivers_are_sorted() {
         // Construct a UA with receivers in an unsorted order.
         let ua = Address(vec![
-            Receiver::P2pkh([0; 20]),
-            Receiver::Orchard([0; 43]),
-            Receiver::Unknown {
+            Item::Data(Receiver::P2pkh([0; 20])),
+            Item::Data(Receiver::Orchard([0; 43])),
+            Item::Data(Receiver::Unknown {
                 typecode: 0xff,
                 data: vec![],
-            },
-            Receiver::Sapling([0; 43]),
+            }),
+            Item::Data(Receiver::Sapling([0; 43])),
         ]);
 
         // `Address::receivers` sorts the receivers in priority order.
         assert_eq!(
-            ua.items(),
+            ua.receivers(),
             vec![
                 Receiver::Orchard([0; 43]),
                 Receiver::Sapling([0; 43]),

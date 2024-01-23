@@ -1,8 +1,8 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 
 use super::{
-    private::{SealedContainer, SealedItem},
-    Container, Encoding, ParseError, Typecode,
+    private::{SealedContainer, SealedDataItem},
+    Container, DataTypecode, Encoding, Item, ParseError,
 };
 
 /// The set of known IVKs for Unified IVKs.
@@ -44,31 +44,27 @@ pub enum Ivk {
     },
 }
 
-impl TryFrom<(u32, &[u8])> for Ivk {
-    type Error = ParseError;
-
-    fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+impl SealedDataItem for Ivk {
+    fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
         let data = data.to_vec();
-        match typecode.try_into()? {
-            Typecode::P2pkh => data.try_into().map(Ivk::P2pkh),
-            Typecode::P2sh => Err(data),
-            Typecode::Sapling => data.try_into().map(Ivk::Sapling),
-            Typecode::Orchard => data.try_into().map(Ivk::Orchard),
-            Typecode::Unknown(_) => Ok(Ivk::Unknown { typecode, data }),
+        match typecode {
+            DataTypecode::P2pkh => data.try_into().map(Ivk::P2pkh),
+            DataTypecode::P2sh => Err(data),
+            DataTypecode::Sapling => data.try_into().map(Ivk::Sapling),
+            DataTypecode::Orchard => data.try_into().map(Ivk::Orchard),
+            DataTypecode::Unknown(typecode) => Ok(Ivk::Unknown { typecode, data }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid ivk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!("Invalid ivk for typecode {:?}: {:?}", typecode, e))
         })
     }
-}
 
-impl SealedItem for Ivk {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Ivk::P2pkh(_) => Typecode::P2pkh,
-            Ivk::Sapling(_) => Typecode::Sapling,
-            Ivk::Orchard(_) => Typecode::Orchard,
-            Ivk::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
+            Ivk::P2pkh(_) => DataTypecode::P2pkh,
+            Ivk::Sapling(_) => DataTypecode::Sapling,
+            Ivk::Orchard(_) => DataTypecode::Orchard,
+            Ivk::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -108,16 +104,16 @@ impl SealedItem for Ivk {
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Uivk(pub(crate) Vec<Ivk>);
+pub struct Uivk(pub(crate) Vec<Item<Ivk>>);
 
 impl Container for Uivk {
-    type Item = Ivk;
+    type DataItem = Ivk;
 
     /// Returns the IVKs contained within this UIVK, in the order they were
     /// parsed from the string encoding.
     ///
     /// This API is for advanced usage; in most cases you should use `Uivk::items`.
-    fn items_as_parsed(&self) -> &[Ivk] {
+    fn items_as_parsed(&self) -> &[Item<Ivk>] {
         &self.0
     }
 }
@@ -142,7 +138,7 @@ impl SealedContainer for Uivk {
     /// The HRP for a Bech32m-encoded regtest Unified IVK.
     const REGTEST: &'static str = "uivkregtest";
 
-    fn from_inner(ivks: Vec<Self::Item>) -> Self {
+    fn from_inner(ivks: Vec<Item<Self::DataItem>>) -> Self {
         Self(ivks)
     }
 }
@@ -160,7 +156,7 @@ mod tests {
     use super::{Ivk, ParseError, Typecode, Uivk};
     use crate::{
         kind::unified::{
-            private::{SealedContainer, SealedItem},
+            private::{SealedContainer, SealedDataItem},
             Container, Encoding,
         },
         Network,
