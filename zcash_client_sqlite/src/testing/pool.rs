@@ -1453,7 +1453,7 @@ pub(crate) fn cross_pool_exchange<P0: ShieldedPoolTester, P1: ShieldedPoolTester
 
     let _min_target_height = proposal0.min_target_height();
     assert_eq!(proposal0.steps().len(), 1);
-    let step0 = &proposal0.steps().head;
+    let step0 = dbg!(&proposal0.steps().head);
 
     // We expect 4 logical actions, two per pool (due to padding).
     let expected_fee = NonNegativeAmount::const_from_u64(20000);

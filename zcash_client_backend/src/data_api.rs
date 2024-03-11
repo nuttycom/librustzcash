@@ -67,7 +67,10 @@ use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 
-use self::{chain::CommitmentTreeRoot, scanning::ScanRange};
+use self::{
+    chain::{ChainState, CommitmentTreeRoot},
+    scanning::ScanRange,
+};
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
@@ -1260,8 +1263,11 @@ pub trait WalletWrite: WalletRead {
     /// pertaining to this wallet.
     ///
     /// `blocks` must be sequential, in order of increasing block height
-    fn put_blocks(&mut self, blocks: Vec<ScannedBlock<Self::AccountId>>)
-        -> Result<(), Self::Error>;
+    fn put_blocks(
+        &mut self,
+        from_state: &ChainState,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
+    ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
     ///
@@ -1400,9 +1406,11 @@ pub mod testing {
     };
 
     use super::{
-        chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        chain::{ChainState, CommitmentTreeRoot},
+        scanning::ScanRange,
+        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
+        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1633,6 +1641,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
+            _from_state: &ChainState,
             _blocks: Vec<ScannedBlock<Self::AccountId>>,
         ) -> Result<(), Self::Error> {
             Ok(())

@@ -145,6 +145,7 @@
 
 use std::ops::Range;
 
+use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
 use zcash_primitives::consensus::{self, BlockHeight};
 
@@ -278,6 +279,68 @@ impl ScanSummary {
     }
 }
 
+/// The final note commitment tree state for each shielded pool, as of a particular block height.
+#[derive(Debug, Clone)]
+pub struct ChainState {
+    block_height: BlockHeight,
+    final_sapling_tree: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
+    #[cfg(feature = "orchard")]
+    final_orchard_tree:
+        Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>,
+}
+
+impl ChainState {
+    /// Construct a new empty chain state.
+    pub fn empty(block_height: BlockHeight) -> Self {
+        Self {
+            block_height,
+            final_sapling_tree: Frontier::empty(),
+            #[cfg(feature = "orchard")]
+            final_orchard_tree: Frontier::empty(),
+        }
+    }
+
+    /// Construct a new [`ChainState`] from its constituent parts.
+    pub fn new(
+        block_height: BlockHeight,
+        final_sapling_tree: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
+        #[cfg(feature = "orchard")] final_orchard_tree: Frontier<
+            orchard::tree::MerkleHashOrchard,
+            { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+        >,
+    ) -> Self {
+        Self {
+            block_height,
+            final_sapling_tree,
+            #[cfg(feature = "orchard")]
+            final_orchard_tree,
+        }
+    }
+
+    /// Returns the block height to which this chain state applies.
+    pub fn block_height(&self) -> BlockHeight {
+        self.block_height
+    }
+
+    /// Returns the frontier of the Sapling note commitment tree as of the end of the block at
+    /// [`Self::block_height`].
+    pub fn final_sapling_tree(
+        &self,
+    ) -> &Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }> {
+        &self.final_sapling_tree
+    }
+
+    /// Returns the frontier of the Orchard note commitment tree as of the end of the block at
+    /// [`Self::block_height`].
+    #[cfg(feature = "orchard")]
+    pub fn final_orchard_tree(
+        &self,
+    ) -> &Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>
+    {
+        &self.final_orchard_tree
+    }
+}
+
 /// Scans at most `limit` blocks from the provided block source for in order to find transactions
 /// received by the accounts tracked in the provided wallet database.
 ///
@@ -290,7 +353,7 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,
     block_source: &BlockSourceT,
     data_db: &mut DbT,
-    from_height: BlockHeight,
+    from_state: &ChainState,
     limit: usize,
 ) -> Result<ScanSummary, Error<DbT::Error, BlockSourceT::Error>>
 where
@@ -299,6 +362,7 @@ where
     DbT: WalletWrite,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
+    let from_height = from_state.block_height + 1;
     // Fetch the UnifiedFullViewingKeys we are tracking
     let account_ufvks = data_db
         .get_unified_full_viewing_keys()
@@ -392,7 +456,9 @@ where
         },
     )?;
 
-    data_db.put_blocks(scanned_blocks).map_err(Error::Wallet)?;
+    data_db
+        .put_blocks(from_state, scanned_blocks)
+        .map_err(Error::Wallet)?;
     Ok(scan_summary)
 }
 
