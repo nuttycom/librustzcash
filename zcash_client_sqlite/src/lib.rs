@@ -828,9 +828,9 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height
                         #[cfg(feature = "orchard")]
                         for (height, checkpoint) in dbg!(&missing_sapling_checkpoints) {
-                            sapling_tree
+                            dbg!(sapling_tree
                                 .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
+                                .add_checkpoint(*height, checkpoint.clone()))
                                 .map_err(ShardTreeError::Storage)?;
                         }
 
@@ -856,9 +856,9 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         }
 
                         for (height, checkpoint) in dbg!(&missing_orchard_checkpoints) {
-                            orchard_tree
+                            dbg!(orchard_tree
                                 .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
+                                .add_checkpoint(*height, checkpoint.clone()))
                                 .map_err(ShardTreeError::Storage)?;
                         }
 
