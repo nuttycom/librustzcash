@@ -297,6 +297,19 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn parse_pool_code(code: i64) -> Option<PoolType> {
+    // These constants are *incidentally* shared with the typecodes
+    // for unified addresses, but this is exclusively an internal
+    // implementation detail.
+    match code {
+        0 => Some(PoolType::Transparent),
+        2 => Some(PoolType::Shielded(ShieldedProtocol::Sapling)),
+        3 => Some(PoolType::Shielded(ShieldedProtocol::Orchard)),
+        _ => None,
+    }
+}
+
 pub(crate) fn scope_code(scope: Scope) -> i64 {
     match scope {
         Scope::External => 0i64,

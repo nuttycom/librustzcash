@@ -43,11 +43,14 @@ use zcash_client_backend::{
     fees::{fixed, standard, DustOutputPolicy},
     keys::UnifiedSpendingKey,
     scanning::ScanError,
-    wallet::{Note, OvkPolicy, ReceivedNote},
+    wallet::{Note, OvkPolicy, ReceivedNote, Recipient},
     zip321::{self, Payment, TransactionRequest},
     ShieldedProtocol,
 };
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::{
+    consensus::BlockHeight,
+    value::{ZatBalance, Zatoshis},
+};
 
 use super::TestFvk;
 use crate::{
@@ -293,6 +296,31 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let tx_history = st.get_tx_history().unwrap();
     assert_eq!(tx_history.len(), 2);
+
+    assert_eq!(
+        tx_history[0].account_value_delta(),
+        ZatBalance::const_from_i64(60000)
+    );
+    let tx_0_out = st.get_tx_outputs(tx_history[0].txid()).unwrap();
+    assert_eq!(tx_0_out.len(), 1);
+    assert_eq!(tx_0_out[0].value(), Zatoshis::const_from_u64(60000));
+
+    assert_eq!(
+        tx_history[1].account_value_delta(),
+        ZatBalance::const_from_i64(-20000)
+    );
+    let tx_1_out = st.get_tx_outputs(tx_history[1].txid()).unwrap();
+    assert_eq!(tx_1_out.len(), 2);
+    assert_eq!(tx_1_out[0].value(), Zatoshis::const_from_u64(10000));
+    assert_matches!(tx_1_out[0].recipient(), Recipient::External(_, _));
+    assert_eq!(tx_1_out[1].value(), Zatoshis::const_from_u64(40000));
+    assert_matches!(
+        tx_1_out[1].recipient(),
+        Recipient::InternalAccount {
+            external_address: None,
+            ..
+        }
+    );
 
     assert_matches!(
         decrypt_and_store_transaction(&st.network(), st.wallet_mut(), &tx),

@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::{collections::BTreeMap, convert::Infallible};
 
 #[cfg(feature = "unstable")]
@@ -12,7 +13,7 @@ use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
-use rusqlite::{params, Connection};
+use rusqlite::{named_params, params, Connection};
 use secrecy::{Secret, SecretVec};
 
 use shardtree::error::ShardTreeError;
@@ -27,6 +28,9 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
+use zcash_address::ZcashAddress;
+use zcash_client_backend::wallet::Recipient;
+use zcash_client_backend::PoolType;
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
@@ -70,6 +74,7 @@ use zcash_primitives::{
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::{ZatBalance, Zatoshis};
 
+use crate::wallet::parse_pool_code;
 use crate::{
     chain::init::init_cache_database,
     error::SqliteClientError,
@@ -1201,6 +1206,65 @@ impl<Cache> TestState<Cache> {
         Ok(results)
     }
 
+    pub(crate) fn get_tx_outputs(
+        &self,
+        txid: TxId,
+    ) -> Result<Vec<TxOutput<AccountId>>, SqliteClientError> {
+        let mut stmt = self.wallet().conn.prepare_cached(
+            "SELECT * 
+             FROM v_tx_outputs 
+             WHERE txid = :txid
+             ORDER BY value",
+        )?;
+
+        let results = stmt
+            .query_and_then::<TxOutput<AccountId>, SqliteClientError, _, _>(
+                named_params![":txid": txid.as_ref()],
+                |row| {
+                    let output_pool = parse_pool_code(row.get::<_, i64>("output_pool")?).ok_or(
+                        SqliteClientError::CorruptedData("Pool code invalid.".to_owned()),
+                    )?;
+                    let recipient_address = row
+                        .get::<_, Option<String>>("to_address")?
+                        .map(|addr_str| ZcashAddress::from_str(&addr_str))
+                        .transpose()?;
+                    let to_account = row.get::<_, Option<u32>>("to_account_id")?.map(AccountId);
+
+                    Ok(TxOutput {
+                        recipient: match (recipient_address, to_account) {
+                            (None, None) => Err(SqliteClientError::CorruptedData(
+                                "At least one of `to_address` or `to_account_id` must be set"
+                                    .to_owned(),
+                            )),
+                            (None, Some(acct)) => Ok(Recipient::InternalAccount {
+                                receiving_account: acct,
+                                external_address: None,
+                                note: output_pool,
+                            }),
+                            (Some(addr), None) => Ok(Recipient::External(addr, output_pool)),
+                            (Some(addr), Some(acct)) => Ok(Recipient::InternalAccount {
+                                receiving_account: acct,
+                                external_address: Some(addr),
+                                note: output_pool,
+                            }),
+                        }?,
+                        output_index: row.get::<_, u32>("output_index")?,
+                        from_account: row.get::<_, Option<u32>>("from_account_id")?.map(AccountId),
+                        to_account: row.get::<_, Option<u32>>("to_account_id")?.map(AccountId),
+                        value: Zatoshis::from_nonnegative_i64(row.get::<_, i64>("value")?)?,
+                        is_change: row.get::<_, bool>("is_change")?,
+                        memo: row
+                            .get::<_, Option<Vec<u8>>>("memo")?
+                            .map(|b| MemoBytes::from_bytes(&b))
+                            .transpose()?,
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+
     #[allow(dead_code)] // used only for tests that are flagged off by default
     pub(crate) fn get_checkpoint_history(
         &self,
@@ -1348,6 +1412,47 @@ impl<AccountId> TransactionSummary<AccountId> {
 
     pub(crate) fn memo_count(&self) -> usize {
         self.memo_count
+    }
+}
+
+pub(crate) struct TxOutput<AccountId> {
+    recipient: Recipient<AccountId, PoolType>,
+    output_index: u32,
+    from_account: Option<AccountId>,
+    to_account: Option<AccountId>,
+    value: Zatoshis,
+    is_change: bool,
+    memo: Option<MemoBytes>,
+}
+
+#[allow(dead_code)]
+impl<AccountId> TxOutput<AccountId> {
+    pub(crate) fn recipient(&self) -> &Recipient<AccountId, PoolType> {
+        &self.recipient
+    }
+
+    pub(crate) fn output_index(&self) -> u32 {
+        self.output_index
+    }
+
+    pub(crate) fn from_account(&self) -> Option<&AccountId> {
+        self.from_account.as_ref()
+    }
+
+    pub(crate) fn to_account(&self) -> Option<&AccountId> {
+        self.to_account.as_ref()
+    }
+
+    pub(crate) fn value(&self) -> Zatoshis {
+        self.value
+    }
+
+    pub(crate) fn is_change(&self) -> bool {
+        self.is_change
+    }
+
+    pub(crate) fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
     }
 }
 
