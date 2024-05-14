@@ -3,15 +3,16 @@
 use super::ScriptError;
 
 // Opcodes for pushing to the stack
-const OP_0: u8 = 0x00;
-const OP_PUSHDATA1: u8 = 0x4c;
-const OP_PUSHDATA2: u8 = 0x4d;
+pub(crate) const OP_0: u8 = 0x00;
+pub(crate) const OP_1: u8 = 0x51;
+pub(crate) const OP_PUSHDATA1: u8 = 0x4c;
+pub(crate) const OP_PUSHDATA2: u8 = 0x4d;
 const OP_PUSHDATA4: u8 = 0x4e;
 
 // First and last opcodes for pushing constants to the stack. OP_RESERVED is
 // 0x50, which is included in this range, but it does not push anything to the
 // stack and is considered invalid when it appears in an executing branch.
-const OP_1NEGATE: u8 = 0x4f;
+pub(crate) const OP_1NEGATE: u8 = 0x4f;
 const OP_16: u8 = 0x60;
 
 // The first and last of the opcodes that are actually executed (with the
@@ -44,11 +45,20 @@ const OP_RSHIFT: u8 = 0x99;
 const OP_CODESEPARATOR: u8 = 0xab;
 
 pub enum Operation {
-    PushBytes(u8),
+    PushBytes(PushOp),
     Constant(i64),
     Opcode(Opcode),
     Invalid,
     Disabled,
+}
+
+#[repr(transparent)]
+pub struct PushOp(u8);
+
+impl PushOp {
+    pub fn op_0() -> Self {
+        PushOp(0x00)
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

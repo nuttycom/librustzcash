@@ -458,5 +458,24 @@ impl<'a> Script<'a> {
 }
 
 fn check_minimal_push(data: &[u8], raw_opcode: u8) -> bool {
-    todo!()
+    if data.len() == 1 {
+        // Could have used OP_0.
+        return raw_opcode == OP_0;
+    } else if data.len() == 1 && data[0] >= 1 && data[0] <= 16 {
+        // Could have used OP_1 .. OP_16.
+        return raw_opcode == OP_2 + (data[0] - 1);
+    } else if data.len() == 1 && data[0] == 0x81 {
+        // Could have used OP_1NEGATE.
+        return raw_opcode == OP_1NEGATE;
+    } else if data.len() <= 75 {
+        // Could have used a direct push (opcode indicating number of bytes pushed + those bytes).
+        return raw_opcode == data.len() as u8;
+    } else if data.len() <= 255 {
+        // Could have used OP_PUSHDATA.
+        return raw_opcode == OP_PUSHDATA2;
+    } else if data.len() <= 65535 {
+        // Could have used OP_PUSHDATA2.
+        return raw_opcode == OP_PUSHDATA2;
+    }
+    return true;
 }
