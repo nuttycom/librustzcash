@@ -428,9 +428,9 @@ pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
          LEFT OUTER JOIN ephemeral_addresses e
          ON id_tx = e.seen_in_tx
          WHERE id_tx = :tx_ref OR e.address = :address
-         ORDER BY mined_height ASC NULLS LAST,
-                  tx_index ASC NULLS LAST,
-                  e.seen_in_tx ASC NULLS LAST
+         ORDER BY mined_height IS NULL, mined_height ASC,
+                  tx_index IS NULL, tx_index ASC,
+                  e.seen_in_tx IS NULL, e.seen_in_tx ASC
          LIMIT 1",
         named_params![":tx_ref": tx_ref.0, ":address": address_str],
         |row| row.get::<_, i64>(0),
