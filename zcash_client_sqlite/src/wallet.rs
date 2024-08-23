@@ -2820,19 +2820,19 @@ pub(crate) fn queue_tx_retrieval(
         "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
             SELECT
             :txid,
-            IIF(
-                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
-                :status_type,
-                :enhancement_type
-            ),
+            CASE
+                WHEN EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL)
+                THEN :status_type
+                ELSE :enhancement_type
+            END,
             :dependent_transaction_id
         ON CONFLICT (txid) DO UPDATE
         SET query_type =
-            IIF(
-                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
-                :status_type,
-                :enhancement_type
-            ),
+            CASE
+                WHEN EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL)
+                THEN :status_type
+                ELSE :enhancement_type
+            END,
             dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
     )?;
 
