@@ -41,9 +41,8 @@ impl RusqliteMigration for Migration {
         Ok(())
     }
 
-    fn down(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch("ALTER TABLE accounts DROP COLUMN has_spend_key")?;
-        Ok(())
+    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }
 

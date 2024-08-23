@@ -130,15 +130,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         Ok(())
     }
 
-    fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch(
-            "DROP TABLE transparent_spend_map;
-             DROP TABLE transparent_spend_search_queue;
-             ALTER TABLE transactions DROP COLUMN target_height;
-             DROP TABLE tx_retrieval_queue;",
-        )?;
-
-        Ok(())
+    fn down(&self, _transaction: &Transaction) -> Result<(), WalletMigrationError> {
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }
 
