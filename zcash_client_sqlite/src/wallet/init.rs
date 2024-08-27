@@ -22,6 +22,10 @@ mod migrations;
 
 #[derive(Debug)]
 pub enum WalletMigrationError {
+    /// A feature required by the wallet database is not supported by the version of
+    /// SQLite that the migration is running against.
+    DatabaseNotSupported(String),
+
     /// The seed is required for the migration.
     SeedRequired,
 
@@ -100,6 +104,13 @@ impl From<SqliteClientError> for WalletMigrationError {
 impl fmt::Display for WalletMigrationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            WalletMigrationError::DatabaseNotSupported(version) => {
+                write!(
+                    f,
+                    "The installed SQLite version {} does not support operations required by the wallet.",
+                    version
+                )
+            }
             WalletMigrationError::SeedRequired => {
                 write!(
                     f,

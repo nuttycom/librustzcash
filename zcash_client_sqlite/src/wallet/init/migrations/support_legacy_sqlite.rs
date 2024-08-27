@@ -1,5 +1,4 @@
-//! A migration that removes the use of `FALSE` in sqlite view definitions.
-//! This is necessary to support older
+//! Modifies definitions to avoid keywords that may not be available in older SQLite versions.
 use std::collections::HashSet;
 
 use rusqlite;
@@ -9,7 +8,7 @@ use uuid::Uuid;
 
 use crate::wallet::init::{migrations::tx_retrieval_queue, WalletMigrationError};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xc9ed1fb5_b2c3_467f_89dc_2591dcca5562);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x156d8c8f_2173_4b59_89b6_75697d5a2103);
 
 const DEPENDENCIES: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
 
@@ -25,7 +24,7 @@ impl schemer::Migration for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Removes the FALSE keyword from the v_tx_outputs view definition"
+        "Modifies definitions to avoid keywords that may not be available in older SQLite versions."
     }
 }
 
@@ -71,6 +70,38 @@ impl RusqliteMigration for Migration {
             WHERE ro.account_id IS NULL
         "#,
         )?;
+
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE tmp_version_check (
+                pk INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                test_value INTEGER
+            );
+            "#,
+        )?;
+
+        let sqlite_version =
+            transaction.query_row("SELECT sqlite_version()", [], |row| row.get::<_, String>(0))?;
+
+        let insert_test_row = || {
+            transaction.query_row(
+                "INSERT INTO tmp_version_check (test_value) VALUES (?) RETURNING pk",
+                [12345],
+                |row| row.get::<_, i64>(0),
+            )
+        };
+
+        let pk_1 = insert_test_row()?;
+        if pk_1 != 1 {
+            return Err(WalletMigrationError::DatabaseNotSupported(sqlite_version));
+        }
+
+        let pk_2 = insert_test_row()?;
+        if pk_2 != 2 {
+            return Err(WalletMigrationError::DatabaseNotSupported(sqlite_version));
+        }
+
+        transaction.execute_batch("DROP TABLE tmp_version_check;")?;
 
         Ok(())
     }
