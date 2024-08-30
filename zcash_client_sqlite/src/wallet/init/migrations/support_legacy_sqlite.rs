@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use rusqlite;
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::wallet::init::{migrations::tx_retrieval_queue, WalletMigrationError};
@@ -92,11 +93,13 @@ impl RusqliteMigration for Migration {
         };
 
         let pk_1 = insert_test_row()?;
+        debug!("WALLET MIGRATION TEST INSERTION RETURNING 1 returned {}", pk_1);
         if pk_1 != 1 {
             return Err(WalletMigrationError::DatabaseNotSupported(sqlite_version));
         }
 
         let pk_2 = insert_test_row()?;
+        debug!("WALLET MIGRATION TEST INSERTION RETURNING 2 returned {}", pk_2);
         if pk_2 != 2 {
             return Err(WalletMigrationError::DatabaseNotSupported(sqlite_version));
         }
