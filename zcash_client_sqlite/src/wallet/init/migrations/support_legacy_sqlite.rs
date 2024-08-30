@@ -83,6 +83,7 @@ impl RusqliteMigration for Migration {
 
         let sqlite_version =
             transaction.query_row("SELECT sqlite_version()", [], |row| row.get::<_, String>(0))?;
+        debug!("WALLET MIGRATION TEST SQLITE VERSION IS {}", sqlite_version);
 
         let insert_test_row = || {
             transaction.query_row(
