@@ -13,7 +13,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::{PoolType, ShieldedProtocol};
 
-use crate::data_api::InputSource;
+use crate::data_api::{InputSource, Ratio};
 
 pub(crate) mod common;
 pub mod fixed;
@@ -344,14 +344,14 @@ impl Default for DustOutputPolicy {
 #[derive(Clone, Copy, Debug)]
 pub struct SplitPolicy {
     target_output_count: NonZeroUsize,
-    min_split_output_size: NonNegativeAmount,
+    min_split_output_size: Option<NonNegativeAmount>,
 }
 
 impl SplitPolicy {
     /// Constructs a new [`SplitPolicy`] from its constituent parts.
     pub fn new(
         target_output_count: NonZeroUsize,
-        min_split_output_size: NonNegativeAmount,
+        min_split_output_size: Option<NonNegativeAmount>,
     ) -> Self {
         Self {
             target_output_count,
@@ -363,7 +363,7 @@ impl SplitPolicy {
     pub fn single_output() -> Self {
         Self {
             target_output_count: NonZeroUsize::MIN,
-            min_split_output_size: NonNegativeAmount::ZERO,
+            min_split_output_size: None,
         }
     }
 
@@ -371,7 +371,7 @@ impl SplitPolicy {
     ///
     /// If splitting change would result in notes of value less than the minimum split output size,
     /// a smaller number of splits should be chosen.
-    pub fn min_split_output_size(&self) -> NonNegativeAmount {
+    pub fn min_split_output_size(&self) -> Option<NonNegativeAmount> {
         self.min_split_output_size
     }
 
@@ -380,27 +380,49 @@ impl SplitPolicy {
     pub fn split_count(
         &self,
         existing_notes: usize,
+        existing_notes_total: NonNegativeAmount,
         total_change: NonNegativeAmount,
     ) -> NonZeroUsize {
+        fn to_nonzero_u64(value: usize) -> NonZeroU64 {
+            NonZeroU64::new(u64::try_from(value).expect("usize fits into u64"))
+                .expect("NonZeroU64 input derived from NonZeroUsize")
+        }
+
         let mut split_count =
             NonZeroUsize::new(usize::from(self.target_output_count).saturating_sub(existing_notes))
                 .unwrap_or(NonZeroUsize::MIN);
 
-        loop {
-            let per_output_change = total_change.div_with_remainder(
-                NonZeroU64::new(
-                    u64::try_from(usize::from(split_count)).expect("usize fits into u64"),
-                )
-                .unwrap(),
-            );
-            if *per_output_change.quotient() >= self.min_split_output_size {
-                return split_count;
-            } else if let Some(new_count) = NonZeroUsize::new(usize::from(split_count) - 1) {
-                split_count = new_count;
-            } else {
-                // We always create at least one change output.
-                return NonZeroUsize::MIN;
+        let min_split_output_size = self.min_split_output_size.or_else(|| {
+            // If no minimum split output size is set, we choose the minimum split size to be a
+            // quarter of the average value of notes in the wallet after the transaction.
+            (existing_notes_total + total_change).map(|total| {
+                *total
+                    .div_with_remainder(to_nonzero_u64(
+                        usize::from(self.target_output_count).saturating_mul(4),
+                    ))
+                    .quotient()
+            })
+        });
+
+        if let Some(min_split_output_size) = min_split_output_size {
+            loop {
+                let per_output_change =
+                    total_change.div_with_remainder(to_nonzero_u64(usize::from(split_count)));
+                if *per_output_change.quotient() >= self.min_split_output_size {
+                    return split_count;
+                } else if let Some(new_count) = NonZeroUsize::new(usize::from(split_count) - 1) {
+                    split_count = new_count;
+                } else {
+                    // We always create at least one change output.
+                    return NonZeroUsize::MIN;
+                }
             }
+        } else {
+            // This is purely defensive; this case would only arise in the case that the addition
+            // of the existing notes with the total change overflows the maximum monetary amount.
+            // Since it's always safe to fall back to a single change value, this is better than a
+            // panic.
+            return NonZeroUsize::MIN;
         }
     }
 }

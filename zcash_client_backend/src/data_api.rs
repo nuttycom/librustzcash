@@ -804,20 +804,28 @@ impl<NoteRef> SpendableNotes<NoteRef> {
 /// the wallet.
 pub struct WalletMeta {
     sapling_note_count: usize,
+    sapling_total_value: NonNegativeAmount,
     #[cfg(feature = "orchard")]
     orchard_note_count: usize,
+    #[cfg(feature = "orchard")]
+    orchard_total_value: NonNegativeAmount,
 }
 
 impl WalletMeta {
     /// Constructs a new [`WalletMeta`] value from its constituent parts.
     pub fn new(
         sapling_note_count: usize,
+        sapling_total_value: NonNegativeAmount,
         #[cfg(feature = "orchard")] orchard_note_count: usize,
+        #[cfg(feature = "orchard")] orchard_total_value: NonNegativeAmount,
     ) -> Self {
         Self {
             sapling_note_count,
+            sapling_total_value,
             #[cfg(feature = "orchard")]
             orchard_note_count,
+            #[cfg(feature = "orchard")]
+            orchard_total_value,
         }
     }
 
@@ -838,6 +846,11 @@ impl WalletMeta {
         self.sapling_note_count
     }
 
+    /// Returns the total value of Sapling notes represented by [`Self::sapling_note_count`].
+    pub fn sapling_total_value(&self) -> NonNegativeAmount {
+        self.sapling_total_value
+    }
+
     /// Returns the number of unspent Orchard notes belonging to the account for which this was
     /// generated.
     #[cfg(feature = "orchard")]
@@ -845,11 +858,48 @@ impl WalletMeta {
         self.orchard_note_count
     }
 
+    /// Returns the total value of Orchard notes represented by [`Self::orchard_note_count`].
+    #[cfg(feature = "orchard")]
+    pub fn orchard_total_value(&self) -> NonNegativeAmount {
+        self.orchard_total_value
+    }
+
     /// Returns the total number of unspent shielded notes belonging to the account for which this
     /// was generated.
     pub fn total_note_count(&self) -> usize {
         self.sapling_note_count + self.note_count(ShieldedProtocol::Orchard)
     }
+
+    /// Returns the total value of shielded notes represented by [`Self::total_note_count`]
+    pub fn total_value(&self) -> NonNegativeAmount {
+        #[cfg(feature = "orchard")]
+        let orchard_value = self.orchard_total_value;
+        #[cfg(not(feature = "orchard"))]
+        let orchard_value = NonNegativeAmount::ZERO;
+
+        (self.sapling_total_value + orchard_value).expect("Does not overflow Zcash maximum value.")
+    }
+}
+
+/// A small query language for filtering notes belonging to an account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoteSelector {
+    /// Selects notes having value greater than or equal to the provided value.
+    MinValue(NonNegativeAmount),
+    /// Selects notes having value greater than or equal to the n'th percentile of previously sent
+    /// notes in the wallet. The wrapped value must be in the range `1..=100`
+    PriorSendPercentile(u8),
+    /// Selects notes having value greater than or equal to the specified percentage of the wallet
+    /// balance. The wrapped value must be in the range `1..=100`
+    BalancePercentage(u8),
+    /// A note will be selected if it satisfies the first condition; if it is not possible to
+    /// evaaluate that condition (for example, [`NoteSelector::PriorSendPercentile`] cannot be
+    /// evaluated if no sends have been performed) then the second condition will be used for
+    /// evaluation.
+    Try {
+        condition: Box<NoteSelector>,
+        fallback: Box<NoteSelector>,
+    },
 }
 
 /// A trait representing the capability to query a data store for unspent transaction outputs
@@ -900,12 +950,15 @@ pub trait InputSource {
     ///
     /// The returned metadata value must exclude:
     /// - spent notes;
-    /// - unspent notes having value less than the specified minimum value;
+    /// - unspent notes excluded by the provided selector;
     /// - unspent notes identified in the given `exclude` list.
+    ///
+    /// Implementations of this method may limit the complexity of supported queries. Such
+    /// limitations should be clearly documented for the implementing type.
     fn get_wallet_metadata(
         &self,
         account: Self::AccountId,
-        min_value: NonNegativeAmount,
+        selector: &NoteSelector,
         exclude: &[Self::NoteRef],
     ) -> Result<WalletMeta, Self::Error>;
 
