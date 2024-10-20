@@ -7,6 +7,20 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Deprecated
+- `zcash_primitives::transaction::fees`:
+  - `fixed::FeeRule::non_standard`. Using a fixed fee may result in a transaction
+    that cannot be mined on the current Zcash network. To calculate the ZIP 317 fee,
+    use `zip317::FeeRule::standard()`.
+
+### Removed
+- `zcash_primitives::transaction::fees`:
+  - `fixed::FeeRule::standard`. This constructor was misleadingly named: using a
+    fixed fee does not conform to any current Zcash standard. To calculate the
+    ZIP 317 fee, use `zip317::FeeRule::standard()`. To preserve the current
+    (deprecated) behaviour, use `fixed::FeeRule::non_standard(zip317::MINIMUM_FEE)`,
+    but note that this is likely to result in transactions that cannot be mined.
+
 ## [0.19.0] - 2024-10-02
 
 ### Changed
