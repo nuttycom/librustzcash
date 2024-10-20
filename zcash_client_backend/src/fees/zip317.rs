@@ -139,10 +139,10 @@ impl<I> MultiOutputChangeStrategy<I> {
     /// change value is available to create notes with at least the minimum value dictated by the
     /// split policy.
     ///
-    /// `fallback_change_pool`: the pool to which change will be sent if when more than one
-    /// shielded pool is enabled via feature flags, and the transaction has no shielded inputs.
-    /// `split_policy`: A policy value describing how the change value should be returned as
-    /// multiple notes.
+    /// - `fallback_change_pool`: the pool to which change will be sent if when more than one
+    ///   shielded pool is enabled via feature flags, and the transaction has no shielded inputs.
+    /// - `split_policy`: A policy value describing how the change value should be returned as
+    ///   multiple notes.
     pub fn new(
         fee_rule: Zip317FeeRule,
         change_memo: Option<MemoBytes>,

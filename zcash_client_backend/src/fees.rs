@@ -393,13 +393,13 @@ impl SplitPolicy {
                 )
                 .unwrap(),
             );
-            if split_count > NonZeroUsize::MIN
-                && *per_output_change.quotient() < self.min_split_output_size
-            {
-                split_count = NonZeroUsize::new(usize::from(split_count) - 1)
-                    .expect("split_count checked to be > 1");
-            } else {
+            if *per_output_change.quotient() >= self.min_split_output_size {
                 return split_count;
+            } else if let Some(new_count) = NonZeroUsize::new(usize::from(split_count) - 1) {
+                split_count = new_count;
+            } else {
+                // We always create at least one change output.
+                return NonZeroUsize::MIN;
             }
         }
     }
