@@ -9,13 +9,19 @@ use zcash_primitives::{
     transaction::{
         components::{amount::NonNegativeAmount, OutPoint},
         fees::{transparent, FeeRule},
+        TxId,
     },
 };
 use zcash_protocol::{PoolType, ShieldedProtocol};
 
-use crate::data_api::InputSource;
+use crate::{
+    data_api::{InputSource, SpendableNotes, WalletMeta},
+    wallet::{Note, ReceivedNote},
+};
 
 pub(crate) mod common;
+pub use common::CommonChangeStrategy;
+
 pub mod fixed;
 #[cfg(feature = "orchard")]
 pub mod orchard;
@@ -432,13 +438,16 @@ pub trait ChangeStrategy {
     fn fee_rule(&self) -> &Self::FeeRule;
 
     /// Uses the provided metadata source to obtain the wallet metadata required for change
-    /// creation determinations.
+    /// creation determinations. If no wallet metadata is needed for this change strategy,
+    /// it is sufficient to use the default implementation which returns `Ok(None)`.
     fn fetch_wallet_meta(
         &self,
-        meta_source: &Self::MetaSource,
-        account: <Self::MetaSource as InputSource>::AccountId,
-        exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::WalletMeta, <Self::MetaSource as InputSource>::Error>;
+        _meta_source: &Self::MetaSource,
+        _account: <Self::MetaSource as InputSource>::AccountId,
+        _exclude: &[<Self::MetaSource as InputSource>::NoteRef],
+    ) -> Result<Option<Self::WalletMeta>, <Self::MetaSource as InputSource>::Error> {
+        Ok(None)
+    }
 
     /// Computes the totals of inputs, suggested change amounts, and fees given the
     /// provided inputs and outputs being used to construct a transaction.
@@ -477,6 +486,43 @@ pub trait ChangeStrategy {
         ephemeral_balance: Option<&EphemeralBalance>,
         wallet_meta: Option<&Self::WalletMeta>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
+}
+
+pub struct DummyMetaSource;
+
+impl InputSource for DummyMetaSource {
+    type Error = ();
+    type AccountId = ();
+    type NoteRef = ();
+
+    fn get_spendable_note(
+        &self,
+        _txid: &TxId,
+        _protocol: ShieldedProtocol,
+        _index: u32,
+    ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+        Err(())
+    }
+
+    fn select_spendable_notes(
+        &self,
+        _account: Self::AccountId,
+        _target_value: NonNegativeAmount,
+        _sources: &[ShieldedProtocol],
+        _anchor_height: BlockHeight,
+        _exclude: &[Self::NoteRef],
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+        Err(())
+    }
+
+    fn get_wallet_metadata(
+        &self,
+        _account: Self::AccountId,
+        _min_value: NonNegativeAmount,
+        _exclude: &[Self::NoteRef],
+    ) -> Result<Option<WalletMeta>, Self::Error> {
+        Err(())
+    }
 }
 
 #[cfg(test)]

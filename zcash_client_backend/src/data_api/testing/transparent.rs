@@ -1,11 +1,12 @@
 use crate::{
     data_api::{
-        testing::{AddressType, TestBuilder, TestState},
-        testing::{DataStoreFactory, ShieldedProtocol, TestCache},
+        testing::{
+            AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
+        },
         wallet::input_selection::GreedyInputSelector,
         Account as _, InputSource, WalletRead, WalletWrite,
     },
-    fees::{fixed, DustOutputPolicy},
+    fees::CommonChangeStrategy,
     wallet::WalletTransparentOutput,
 };
 use assert_matches::assert_matches;
@@ -198,12 +199,11 @@ where
 
     // Shield the output.
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = fixed::SingleOutputChangeStrategy::new(
+    let change_strategy = CommonChangeStrategy::simple(
         #[allow(deprecated)]
         FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
         None,
         ShieldedProtocol::Sapling,
-        DustOutputPolicy::default(),
     );
     let txid = st
         .shield_transparent_funds(

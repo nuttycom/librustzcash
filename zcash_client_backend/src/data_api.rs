@@ -907,7 +907,7 @@ pub trait InputSource {
         account: Self::AccountId,
         min_value: NonNegativeAmount,
         exclude: &[Self::NoteRef],
-    ) -> Result<WalletMeta, Self::Error>;
+    ) -> Result<Option<WalletMeta>, Self::Error>;
 
     /// Fetches the transparent output corresponding to the provided `outpoint`.
     ///

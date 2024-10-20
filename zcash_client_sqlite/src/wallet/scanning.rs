@@ -599,7 +599,6 @@ pub(crate) mod tests {
                 testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
                 WalletCommitmentTrees,
             },
-            fees::{standard, DustOutputPolicy},
             wallet::OvkPolicy,
         },
         zcash_primitives::{memo::Memo, transaction::fees::StandardFeeRule},
@@ -1713,7 +1712,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_complete() {
-        use zcash_client_backend::data_api::Account as _;
+        use zcash_client_backend::{data_api::Account as _, fees::CommonChangeStrategy};
 
         let mut st = prepare_orchard_block_spanning_test(true);
         let account = st.test_account().cloned().unwrap();
@@ -1775,11 +1774,10 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::Zip317;
 
         let change_memo = "Test change memo".parse::<Memo>().unwrap();
-        let change_strategy = standard::SingleOutputChangeStrategy::new(
+        let change_strategy = CommonChangeStrategy::simple(
             fee_rule,
             Some(change_memo.into()),
             OrchardPoolTester::SHIELDED_PROTOCOL,
-            DustOutputPolicy::default(),
         );
         let input_selector = GreedyInputSelector::new();
 
@@ -1806,7 +1804,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_incomplete() {
-        use zcash_client_backend::data_api::Account as _;
+        use zcash_client_backend::{data_api::Account as _, fees::CommonChangeStrategy};
 
         let mut st = prepare_orchard_block_spanning_test(false);
         let account = st.test_account().cloned().unwrap();
@@ -1864,11 +1862,10 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::Zip317;
 
         let change_memo = "Test change memo".parse::<Memo>().unwrap();
-        let change_strategy = standard::SingleOutputChangeStrategy::new(
+        let change_strategy = CommonChangeStrategy::simple(
             fee_rule,
             Some(change_memo.into()),
             OrchardPoolTester::SHIELDED_PROTOCOL,
-            DustOutputPolicy::default(),
         );
         let input_selector = GreedyInputSelector::new();
 

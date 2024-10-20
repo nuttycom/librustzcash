@@ -13,8 +13,10 @@ and this library adheres to Rust's notion of
   - `WalletSummary::progress`
   - `WalletMeta`
   - `impl Default for wallet::input_selection::GreedyInputSelector`
-- `zcash_client_backend::fees::SplitPolicy`
-- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy`
+- `zcash_client_backend::fees::{SplitPolicy, CommonChangeStrategy}`. These
+  allow specifying a policy for splitting change into more than one output,
+  which can help to make enough notes available to perform multiple spends
+  without waiting for change.
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -54,11 +56,6 @@ and this library adheres to Rust's notion of
     and `WalletMeta`, and its `FeeRule` associated type now has an additional
     `Clone` bound. In addition, it defines a new `fetch_wallet_meta` method, and
     the arguments to `compute_balance` have changed.
-  - The following methods now take an additional `DustOutputPolicy` argument,
-    and carry an additional type parameter:
-    - `fixed::SingleOutputChangeStrategy::new`
-    - `standard::SingleOutputChangeStrategy::new`
-    - `zip317::SingleOutputChangeStrategy::new`
 - `zcash_client_backend::proto`:
   - The `FeeRuleNotSpecified` variant of `FeeProposalDecodingError` has been
     renamed to `FeeRuleNotSupported`. It is now used to report attempted use
@@ -67,12 +64,19 @@ and this library adheres to Rust's notion of
 ### Changed
 - Migrated to `arti-client 0.22`.
 
+### Deprecated
+- `zcash_client_backend::fees::{fixed,standard,zip317}::SingleOutputChangeStrategy::new`
+  have been deprecated: instead use `CommonChangeStrategy::simple`.
+  (For most uses, the type parameter of the fee rule will be inferred.)
+
 ### Removed
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
-  - `testing::input_selector` use explicit `InputSelector` constructors
+  - `testing::input_selector`. Use explicit `InputSelector` constructors
     directly instead.
+  - `testing::single_output_change_strategy`. Use `fees::CommonChangeStrategy::simple`
+    instead.
 - `zcash_client_backend::fees`:
   - `impl From<BalanceError> for ChangeError<...>`
 

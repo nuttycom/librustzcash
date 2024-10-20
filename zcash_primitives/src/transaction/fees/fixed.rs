@@ -1,3 +1,7 @@
+use std::convert::Infallible;
+
+use zcash_protocol::value::BalanceError;
+
 use crate::{
     consensus::{self, BlockHeight},
     transaction::components::amount::NonNegativeAmount,
@@ -31,7 +35,8 @@ impl FeeRule {
 }
 
 impl super::FeeRule for FeeRule {
-    type Error = std::convert::Infallible;
+    type Error = Infallible;
+    type FeeRuleOrBalanceError = BalanceError;
 
     fn fee_required<P: consensus::Parameters>(
         &self,
@@ -44,6 +49,18 @@ impl super::FeeRule for FeeRule {
         _orchard_action_count: usize,
     ) -> Result<NonNegativeAmount, Self::Error> {
         Ok(self.fixed_fee)
+    }
+
+    fn default_dust_threshold(&self) -> NonNegativeAmount {
+        self.fixed_fee
+    }
+
+    fn marginal_fee(&self) -> NonNegativeAmount {
+        NonNegativeAmount::ZERO
+    }
+
+    fn grace_actions(&self) -> usize {
+        0
     }
 }
 

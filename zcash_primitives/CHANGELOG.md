@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `zcash_primitives::transaction::fees::FeeRule` trait has additional
+  `default_dust_threshold`, `marginal_fee`, and `grace_actions` methods, and
+  a `FeeRuleOrBalanceError` associated type.
+
 ### Deprecated
 - `zcash_primitives::transaction::fees`:
   - `fixed::FeeRule::non_standard`. Using a fixed fee may result in a transaction

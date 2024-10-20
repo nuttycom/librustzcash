@@ -50,7 +50,10 @@ use crate::{
         WalletRead, WalletWrite,
     },
     decrypt_transaction,
-    fees::{standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy},
+    fees::{
+        standard::SingleOutputChangeStrategy, ChangeStrategy, CommonChangeStrategy,
+        DustOutputPolicy, SplitPolicy,
+    },
     keys::UnifiedSpendingKey,
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
@@ -301,10 +304,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     min_confirmations: NonZeroU32,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
-) -> Result<
-    NonEmpty<TxId>,
-    TransferErrT<DbT, GreedyInputSelector<DbT>, SingleOutputChangeStrategy<DbT>>,
->
+) -> Result<NonEmpty<TxId>, TransferErrT<DbT, GreedyInputSelector<DbT>, SingleOutputChangeStrategy>>
 where
     ParamsT: consensus::Parameters + Clone,
     DbT: InputSource,
@@ -533,7 +533,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
         DbT,
         CommitmentTreeErrT,
         GreedyInputSelector<DbT>,
-        SingleOutputChangeStrategy<DbT>,
+        SingleOutputChangeStrategy,
     >,
 >
 where
@@ -559,11 +559,12 @@ where
     );
 
     let input_selector = GreedyInputSelector::<DbT>::new();
-    let change_strategy = SingleOutputChangeStrategy::<DbT>::new(
+    let change_strategy = CommonChangeStrategy::<DbT, _>::new(
         fee_rule,
         change_memo,
         fallback_change_pool,
         DustOutputPolicy::default(),
+        SplitPolicy::single_output(), // TODO: consider changing
     );
 
     propose_transfer(

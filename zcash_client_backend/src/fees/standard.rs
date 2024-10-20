@@ -1,21 +1,17 @@
 //! Change strategies designed for use with a standard fee.
 
-use std::marker::PhantomData;
+use std::convert::Infallible;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::fees::{
-        transparent,
-        zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
-        StandardFeeRule,
-    },
+    transaction::fees::{transparent, zip317::FeeError as Zip317FeeError, StandardFeeRule},
 };
 
-use crate::{data_api::InputSource, ShieldedProtocol};
+use crate::ShieldedProtocol;
 
 use super::{
-    sapling as sapling_fees, zip317, ChangeError, ChangeStrategy, DustOutputPolicy,
+    sapling as sapling_fees, ChangeError, ChangeStrategy, CommonChangeStrategy, DummyMetaSource,
     EphemeralBalance, TransactionBalance,
 };
 
@@ -26,53 +22,36 @@ use super::orchard as orchard_fees;
 /// as the most current pool that avoids unnecessary pool-crossing (with a specified
 /// fallback when the transaction has no shielded inputs). Fee calculation is delegated
 /// to the provided fee rule.
-pub struct SingleOutputChangeStrategy<I> {
-    fee_rule: StandardFeeRule,
-    change_memo: Option<MemoBytes>,
-    fallback_change_pool: ShieldedProtocol,
-    dust_output_policy: DustOutputPolicy,
-    meta_source: PhantomData<I>,
-}
+pub struct SingleOutputChangeStrategy(CommonChangeStrategy<DummyMetaSource, StandardFeeRule>);
 
-impl<I> SingleOutputChangeStrategy<I> {
-    /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
-    /// fee parameters.
+impl SingleOutputChangeStrategy {
+    /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule
+    /// and change memo.
     ///
     /// `fallback_change_pool` is used when more than one shielded pool is enabled via
     /// feature flags, and the transaction has no shielded inputs.
+    #[deprecated(note = "Use [`CommonChangeStrategy::simple`] instead.")]
     pub fn new(
         fee_rule: StandardFeeRule,
         change_memo: Option<MemoBytes>,
         fallback_change_pool: ShieldedProtocol,
-        dust_output_policy: DustOutputPolicy,
     ) -> Self {
-        Self {
+        Self(CommonChangeStrategy::simple(
             fee_rule,
             change_memo,
             fallback_change_pool,
-            dust_output_policy,
-            meta_source: PhantomData,
-        }
+        ))
     }
 }
 
-impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
+impl ChangeStrategy for SingleOutputChangeStrategy {
     type FeeRule = StandardFeeRule;
     type Error = Zip317FeeError;
-    type MetaSource = I;
-    type WalletMeta = ();
+    type MetaSource = DummyMetaSource;
+    type WalletMeta = Infallible;
 
     fn fee_rule(&self) -> &Self::FeeRule {
-        &self.fee_rule
-    }
-
-    fn fetch_wallet_meta(
-        &self,
-        _meta_source: &Self::MetaSource,
-        _account: <Self::MetaSource as InputSource>::AccountId,
-        _exclude: &[<Self::MetaSource as crate::data_api::InputSource>::NoteRef],
-    ) -> Result<Self::WalletMeta, <Self::MetaSource as crate::data_api::InputSource>::Error> {
-        Ok(())
+        self.0.fee_rule()
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -84,26 +63,18 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        wallet_meta: Option<&Self::WalletMeta>,
+        _wallet_meta: Option<&Self::WalletMeta>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        match self.fee_rule() {
-            StandardFeeRule::Zip317 => zip317::SingleOutputChangeStrategy::<I>::new(
-                Zip317FeeRule::standard(),
-                self.change_memo.clone(),
-                self.fallback_change_pool,
-                self.dust_output_policy,
-            )
-            .compute_balance(
-                params,
-                target_height,
-                transparent_inputs,
-                transparent_outputs,
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-                ephemeral_balance,
-                wallet_meta,
-            ),
-        }
+        self.0.compute_balance(
+            params,
+            target_height,
+            transparent_inputs,
+            transparent_outputs,
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            ephemeral_balance,
+            None,
+        )
     }
 }

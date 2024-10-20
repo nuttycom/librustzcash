@@ -40,10 +40,7 @@ use crate::{
         self,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
-        testing::{
-            single_output_change_strategy, AddressType, FakeCompactOutput, InitialChainState,
-            TestBuilder,
-        },
+        testing::{AddressType, FakeCompactOutput, InitialChainState, TestBuilder},
         wallet::{
             decrypt_and_store_transaction, input_selection::GreedyInputSelector, TransferErrT,
         },
@@ -52,9 +49,7 @@ use crate::{
     },
     decrypt_transaction,
     fees::{
-        self,
-        standard::{self, SingleOutputChangeStrategy},
-        DustOutputPolicy, SplitPolicy,
+        standard::SingleOutputChangeStrategy, CommonChangeStrategy, DustOutputPolicy, SplitPolicy,
     },
     scanning::ScanError,
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
@@ -217,14 +212,11 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     )])
     .unwrap();
 
-    let fee_rule = StandardFeeRule::Zip317;
-
     let change_memo = "Test change memo".parse::<Memo>().unwrap();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        fee_rule,
+    let change_strategy = CommonChangeStrategy::simple(
+        StandardFeeRule::Zip317,
         Some(change_memo.clone().into()),
         T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
     );
     let input_selector = GreedyInputSelector::new();
 
@@ -361,7 +353,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
 
     let input_selector = GreedyInputSelector::new();
     let change_memo = "Test change memo".parse::<Memo>().unwrap();
-    let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
+    let change_strategy = CommonChangeStrategy::new(
         Zip317FeeRule::standard(),
         Some(change_memo.clone().into()),
         T::SHIELDED_PROTOCOL,
@@ -464,7 +456,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
 
     // Now, create another proposal with more outputs requested. We have two change notes;
     // we'll spend one of them, and then we'll generate 7 splits.
-    let change_strategy = fees::zip317::MultiOutputChangeStrategy::new(
+    let change_strategy = CommonChangeStrategy::new(
         Zip317FeeRule::standard(),
         Some(change_memo.into()),
         T::SHIELDED_PROTOCOL,
@@ -1377,7 +1369,7 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
         TransferErrT<
             DSF::DataStore,
             GreedyInputSelector<DSF::DataStore>,
-            SingleOutputChangeStrategy<DSF::DataStore>,
+            SingleOutputChangeStrategy,
         >,
     > {
         let min_confirmations = NonZeroU32::new(1).unwrap();
@@ -1587,12 +1579,7 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
 
     #[allow(deprecated)]
     let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(
-        fee_rule,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy = CommonChangeStrategy::simple(fee_rule, None, T::SHIELDED_PROTOCOL);
     let input_selector = GreedyInputSelector::new();
 
     let txid = st
@@ -1681,7 +1668,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
 
     let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
     let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+        CommonChangeStrategy::simple(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
     // This first request will fail due to insufficient non-dust funds
     let req = TransactionRequest::new(vec![Payment::without_memo(
@@ -1780,7 +1767,7 @@ where
 
     let input_selector = GreedyInputSelector::new();
     let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+        CommonChangeStrategy::simple(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
     let txids = st
         .shield_transparent_funds(
@@ -2027,7 +2014,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
     let input_selector = GreedyInputSelector::new();
     let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, P1::SHIELDED_PROTOCOL);
+        CommonChangeStrategy::simple(StandardFeeRule::Zip317, None, P1::SHIELDED_PROTOCOL);
     let proposal0 = st
         .propose_transfer(
             account.id(),
@@ -2119,7 +2106,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     // We set the default change output pool to P0, because we want to verify later that
     // change is actually sent to P1 (as the transaction is fully fundable from P1).
     let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
+        CommonChangeStrategy::simple(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
     let proposal0 = st
         .propose_transfer(
             account.id(),
@@ -2209,7 +2196,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     // We set the default change output pool to P0, because we want to verify later that
     // change is actually sent to P1 (as the transaction is fully fundable from P1).
     let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
+        CommonChangeStrategy::simple(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
     let proposal0 = st
         .propose_transfer(
             account.id(),
@@ -2307,7 +2294,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     // Set up the fee rule and input selector we'll use for all the transfers.
     let input_selector = GreedyInputSelector::new();
     let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, P1::SHIELDED_PROTOCOL);
+        CommonChangeStrategy::simple(StandardFeeRule::Zip317, None, P1::SHIELDED_PROTOCOL);
 
     // First, send funds just to P0
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
@@ -2791,10 +2778,9 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     )])
     .unwrap();
 
-    #[allow(deprecated)]
     let input_selector = GreedyInputSelector::new();
     let change_strategy =
-        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+        CommonChangeStrategy::simple(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
     assert_matches!(
         st.spend(

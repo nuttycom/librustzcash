@@ -617,7 +617,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     &orchard_outputs[..],
                 ),
                 ephemeral_balance.as_ref(),
-                Some(&wallet_meta),
+                wallet_meta.as_ref(),
             );
 
             match balance {
@@ -819,7 +819,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            Some(&wallet_meta),
+            wallet_meta.as_ref(),
         );
 
         let balance = match trial_balance {
@@ -837,7 +837,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     None,
-                    Some(&wallet_meta),
+                    wallet_meta.as_ref(),
                 )?
             }
             Err(other) => return Err(InputSelectorError::Change(other)),
