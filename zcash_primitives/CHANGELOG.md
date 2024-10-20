@@ -20,6 +20,8 @@ and this library adheres to Rust's notion of
     ZIP 317 fee, use `zip317::FeeRule::standard()`. To preserve the current
     (deprecated) behaviour, use `fixed::FeeRule::non_standard(zip317::MINIMUM_FEE)`,
     but note that this is likely to result in transactions that cannot be mined.
+  - `StandardFeeRule::{PreZip313,Zip313}`. These also are likely to result in
+    transactions that cannot be mined.
 
 ## [0.19.0] - 2024-10-02
 

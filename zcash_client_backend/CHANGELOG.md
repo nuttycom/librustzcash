@@ -59,6 +59,10 @@ and this library adheres to Rust's notion of
     - `fixed::SingleOutputChangeStrategy::new`
     - `standard::SingleOutputChangeStrategy::new`
     - `zip317::SingleOutputChangeStrategy::new`
+- `zcash_client_backend::proto`:
+  - The `FeeRuleNotSpecified` variant of `FeeProposalDecodingError` has been
+    renamed to `FeeRuleNotSupported`. It is now used to report attempted use
+    of unsupported fee rules, as well as of an unspecified fee rule.
 
 ### Changed
 - Migrated to `arti-client 0.22`.

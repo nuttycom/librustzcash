@@ -1018,7 +1018,7 @@ where
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
             account_id,
-            StandardFeeRule::PreZip313,
+            StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
             &to,
             NonNegativeAmount::const_from_u64(1),

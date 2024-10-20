@@ -323,7 +323,7 @@ where
     let proposal = propose_standard_transfer_to_address(
         wallet_db,
         params,
-        StandardFeeRule::PreZip313,
+        StandardFeeRule::Zip317,
         account.id(),
         min_confirmations,
         to,
