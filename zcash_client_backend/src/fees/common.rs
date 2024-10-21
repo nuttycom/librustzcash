@@ -1,5 +1,8 @@
 use core::cmp::{max, min};
-use std::num::{NonZeroU64, NonZeroUsize};
+use std::{
+    marker::PhantomData,
+    num::{NonZeroU64, NonZeroUsize},
+};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
@@ -11,15 +14,130 @@ use zcash_primitives::{
 };
 use zcash_protocol::ShieldedProtocol;
 
-use crate::data_api::WalletMeta;
+use crate::data_api::{InputSource, WalletMeta};
 
 use super::{
-    sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
-    EphemeralBalance, SplitPolicy, TransactionBalance,
+    sapling as sapling_fees, ChangeError, ChangeStrategy, ChangeValue, DustAction,
+    DustOutputPolicy, EphemeralBalance, SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
+
+/// A change strategy that attempts to split the change value into some number of equal-sized notes
+/// as dictated by the included [`SplitPolicy`] value.
+pub struct CommonChangeStrategy<I, FR> {
+    fee_rule: FR,
+    change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
+    dust_output_policy: DustOutputPolicy,
+    split_policy: SplitPolicy,
+    _meta_source: PhantomData<I>,
+}
+
+impl<I: InputSource, FR: FeeRule + Clone> CommonChangeStrategy<I, FR> {
+    /// Constructs a new [`CommonChangeStrategy`] with the specified fee rule, change memo,
+    /// dust output policy, and change splitting policy.
+    ///
+    /// This change strategy will fall back to creating a single change output if insufficient
+    /// change value is available to create notes with at least the minimum value dictated by the
+    /// split policy.
+    ///
+    /// * `fallback_change_pool`: the pool to which change will be sent if when more than one
+    ///   shielded pool is enabled via feature flags, and the transaction has no shielded inputs.
+    /// * `split_policy`: A policy value describing how the change value should be returned as
+    ///   multiple notes.
+    pub fn new(
+        fee_rule: FR,
+        change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
+        dust_output_policy: DustOutputPolicy,
+        split_policy: SplitPolicy,
+    ) -> Self {
+        Self {
+            fee_rule,
+            change_memo,
+            fallback_change_pool,
+            dust_output_policy,
+            split_policy,
+            _meta_source: PhantomData,
+        }
+    }
+
+    /// Constructs a new [`CommonChangeStrategy`] with the specified fee rule, change memo,
+    /// and a single change output. This is equivalent to [`CommonChangeStrategy::new`] with
+    /// `dust_output_policy == DustOutputPolicy::default()` and
+    /// `split_policy == SplitPolicy::single_output()`.
+    pub fn simple(
+        fee_rule: FR,
+        change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
+    ) -> Self {
+        Self::new(
+            fee_rule,
+            change_memo,
+            fallback_change_pool,
+            DustOutputPolicy::default(),
+            SplitPolicy::single_output(),
+        )
+    }
+}
+
+impl<I: InputSource, FR: FeeRule + Clone> ChangeStrategy for CommonChangeStrategy<I, FR> {
+    type FeeRule = FR;
+    type Error = FR::FeeRuleOrBalanceError;
+    type MetaSource = I;
+    type WalletMeta = WalletMeta;
+
+    fn fee_rule(&self) -> &FR {
+        &self.fee_rule
+    }
+
+    fn fetch_wallet_meta(
+        &self,
+        meta_source: &Self::MetaSource,
+        account: <Self::MetaSource as InputSource>::AccountId,
+        exclude: &[<Self::MetaSource as InputSource>::NoteRef],
+    ) -> Result<Option<Self::WalletMeta>, <Self::MetaSource as InputSource>::Error> {
+        meta_source.get_wallet_metadata(account, self.split_policy.min_split_output_size(), exclude)
+    }
+
+    fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+        transparent_inputs: &[impl transparent::InputView],
+        transparent_outputs: &[impl transparent::OutputView],
+        sapling: &impl sapling_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
+        ephemeral_balance: Option<&EphemeralBalance>,
+        wallet_meta: Option<&Self::WalletMeta>,
+    ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+        let cfg = SinglePoolBalanceConfig::new(
+            params,
+            &self.fee_rule,
+            &self.dust_output_policy,
+            self.fee_rule.default_dust_threshold(),
+            &self.split_policy,
+            self.fallback_change_pool,
+            self.fee_rule.marginal_fee(),
+            self.fee_rule.grace_actions(),
+        );
+
+        single_pool_output_balance(
+            cfg,
+            wallet_meta,
+            target_height,
+            transparent_inputs,
+            transparent_outputs,
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            self.change_memo.as_ref(),
+            ephemeral_balance,
+        )
+    }
+}
 
 pub(crate) struct NetFlows {
     t_in: NonNegativeAmount,

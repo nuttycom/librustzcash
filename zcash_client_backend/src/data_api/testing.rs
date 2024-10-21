@@ -46,10 +46,7 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     address::UnifiedAddress,
-    fees::{
-        standard::{self, SingleOutputChangeStrategy},
-        ChangeStrategy, DustOutputPolicy,
-    },
+    fees::{standard::SingleOutputChangeStrategy, ChangeStrategy},
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proposal::Proposal,
     proto::compact_formats::{
@@ -60,13 +57,15 @@ use crate::{
 };
 
 #[allow(deprecated)]
+use super::wallet::{create_spend_to_address, spend};
+
 use super::{
     chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
     scanning::ScanRange,
     wallet::{
-        create_proposed_transactions, create_spend_to_address,
+        create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer, spend,
+        propose_standard_transfer_to_address, propose_transfer,
     },
     Account, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
     DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
@@ -877,7 +876,7 @@ where
         fallback_change_pool: ShieldedProtocol,
     ) -> Result<
         NonEmpty<TxId>,
-        super::wallet::TransferErrT<DbT, GreedyInputSelector<DbT>, SingleOutputChangeStrategy<DbT>>,
+        super::wallet::TransferErrT<DbT, GreedyInputSelector<DbT>, SingleOutputChangeStrategy>,
     > {
         let prover = LocalTxProver::bundled();
         let network = self.network().clone();
@@ -977,7 +976,7 @@ where
             DbT,
             CommitmentTreeErrT,
             GreedyInputSelector<DbT>,
-            SingleOutputChangeStrategy<DbT>,
+            SingleOutputChangeStrategy,
         >,
     > {
         let network = self.network().clone();
@@ -1219,20 +1218,6 @@ impl<Cache, DbT: WalletRead + Reset> TestState<Cache, DbT, LocalNetwork> {
     //            })
     //            .unwrap();
     //    }
-}
-
-pub fn single_output_change_strategy<DbT: InputSource>(
-    fee_rule: StandardFeeRule,
-    change_memo: Option<&str>,
-    fallback_change_pool: ShieldedProtocol,
-) -> standard::SingleOutputChangeStrategy<DbT> {
-    let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
-    standard::SingleOutputChangeStrategy::new(
-        fee_rule,
-        change_memo,
-        fallback_change_pool,
-        DustOutputPolicy::default(),
-    )
 }
 
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
@@ -2379,7 +2364,7 @@ impl InputSource for MockWalletDb {
         _account: Self::AccountId,
         _min_value: NonNegativeAmount,
         _exclude: &[Self::NoteRef],
-    ) -> Result<WalletMeta, Self::Error> {
+    ) -> Result<Option<WalletMeta>, Self::Error> {
         Err(())
     }
 }

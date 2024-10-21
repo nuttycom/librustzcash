@@ -353,7 +353,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         account_id: Self::AccountId,
         min_value: NonNegativeAmount,
         exclude: &[Self::NoteRef],
-    ) -> Result<WalletMeta, Self::Error> {
+    ) -> Result<Option<WalletMeta>, Self::Error> {
         let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
 
@@ -376,11 +376,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
             chain_tip_height,
         )?;
 
-        Ok(WalletMeta::new(
+        Ok(Some(WalletMeta::new(
             sapling_note_count,
             #[cfg(feature = "orchard")]
             orchard_note_count,
-        ))
+        )))
     }
 }
 

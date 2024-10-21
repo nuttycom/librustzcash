@@ -83,7 +83,7 @@ impl FeeRule {
                  || p2pkh_standard_input_size > P2PKH_STANDARD_INPUT_SIZE \
                  || p2pkh_standard_output_size > P2PKH_STANDARD_OUTPUT_SIZE` \
                 violates ZIP 317, and might cause transactions built with it to fail. \
-                This API is likely to be removed. Use `[FeeRule::standard]` instead."
+                This API is likely to be removed. Use [`FeeRule::standard`] instead."
     )]
     pub fn non_standard(
         marginal_fee: NonNegativeAmount,
@@ -103,14 +103,6 @@ impl FeeRule {
         }
     }
 
-    /// Returns the ZIP 317 marginal fee.
-    pub fn marginal_fee(&self) -> NonNegativeAmount {
-        self.marginal_fee
-    }
-    /// Returns the ZIP 317 number of grace actions
-    pub fn grace_actions(&self) -> usize {
-        self.grace_actions
-    }
     /// Returns the ZIP 317 standard P2PKH input size
     pub fn p2pkh_standard_input_size(&self) -> usize {
         self.p2pkh_standard_input_size
@@ -152,6 +144,7 @@ impl std::fmt::Display for FeeError {
 
 impl super::FeeRule for FeeRule {
     type Error = FeeError;
+    type FeeRuleOrBalanceError = FeeError;
 
     fn fee_required<P: consensus::Parameters>(
         &self,
@@ -192,5 +185,17 @@ impl super::FeeRule for FeeRule {
 
         (self.marginal_fee * max(self.grace_actions, logical_actions))
             .ok_or_else(|| BalanceError::Overflow.into())
+    }
+
+    fn default_dust_threshold(&self) -> NonNegativeAmount {
+        self.marginal_fee
+    }
+
+    fn marginal_fee(&self) -> NonNegativeAmount {
+        self.marginal_fee
+    }
+
+    fn grace_actions(&self) -> usize {
+        self.grace_actions
     }
 }

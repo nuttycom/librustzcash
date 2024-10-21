@@ -1,5 +1,7 @@
 //! Abstractions and types related to fee calculations.
 
+use zcash_protocol::value::BalanceError;
+
 use crate::{
     consensus::{self, BlockHeight},
     transaction::{components::amount::NonNegativeAmount, fees::transparent::InputSize},
@@ -16,6 +18,7 @@ pub mod tze;
 /// by a transaction having a specified set of inputs and outputs.
 pub trait FeeRule {
     type Error;
+    type FeeRuleOrBalanceError: From<Self::Error> + From<BalanceError>;
 
     /// Computes the total fee required for a transaction given the provided inputs and outputs.
     ///
@@ -33,6 +36,16 @@ pub trait FeeRule {
         sapling_output_count: usize,
         orchard_action_count: usize,
     ) -> Result<NonNegativeAmount, Self::Error>;
+
+    /// Returns the default dust threshold.
+    fn default_dust_threshold(&self) -> NonNegativeAmount;
+
+    /// Returns the marginal fee, i.e. the amount by which the fee increases for each
+    /// logical action as defined in ZIP 317.
+    fn marginal_fee(&self) -> NonNegativeAmount;
+
+    /// Returns the number of grace actions, or 0 if this rule does not use grace actions.
+    fn grace_actions(&self) -> usize;
 }
 
 /// A trait that represents the ability to compute the fees that must be paid by a transaction
@@ -62,19 +75,12 @@ pub trait FutureFeeRule: FeeRule {
 /// An enumeration of the standard fee rules supported by the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StandardFeeRule {
-    #[deprecated(
-        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
-    )]
-    PreZip313,
-    #[deprecated(
-        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
-    )]
-    Zip313,
     Zip317,
 }
 
 impl FeeRule for StandardFeeRule {
     type Error = zip317::FeeError;
+    type FeeRuleOrBalanceError = zip317::FeeError;
 
     fn fee_required<P: consensus::Parameters>(
         &self,
@@ -86,10 +92,7 @@ impl FeeRule for StandardFeeRule {
         sapling_output_count: usize,
         orchard_action_count: usize,
     ) -> Result<NonNegativeAmount, Self::Error> {
-        #[allow(deprecated)]
         match self {
-            Self::PreZip313 => Ok(zip317::MINIMUM_FEE),
-            Self::Zip313 => Ok(NonNegativeAmount::const_from_u64(1000)),
             Self::Zip317 => zip317::FeeRule::standard().fee_required(
                 params,
                 target_height,
@@ -100,5 +103,17 @@ impl FeeRule for StandardFeeRule {
                 orchard_action_count,
             ),
         }
+    }
+
+    fn default_dust_threshold(&self) -> NonNegativeAmount {
+        zip317::MARGINAL_FEE
+    }
+
+    fn marginal_fee(&self) -> NonNegativeAmount {
+        zip317::MARGINAL_FEE
+    }
+
+    fn grace_actions(&self) -> usize {
+        zip317::GRACE_ACTIONS
     }
 }

@@ -1,7 +1,11 @@
+use std::convert::Infallible;
+
+use zcash_protocol::value::BalanceError;
+
 use crate::{
     consensus::{self, BlockHeight},
     transaction::components::amount::NonNegativeAmount,
-    transaction::fees::{transparent, zip317},
+    transaction::fees::transparent,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -16,27 +20,12 @@ pub struct FeeRule {
 
 impl FeeRule {
     /// Creates a new nonstandard fixed fee rule with the specified fixed fee.
+    #[deprecated(
+        note = "Using a fixed fee may result in a transaction that cannot be mined. \
+                To calculate the ZIP 317 fee, use `transaction::fees::zip317::FeeRule::standard()`."
+    )]
     pub fn non_standard(fixed_fee: NonNegativeAmount) -> Self {
         Self { fixed_fee }
-    }
-
-    /// Creates a new fixed fee rule with the minimum possible [ZIP 317] fee,
-    /// i.e. 10000 zatoshis.
-    ///
-    /// Note that using a fixed fee is not compliant with [ZIP 317]; consider
-    /// using [`zcash_primitives::transaction::fees::zip317::FeeRule::standard()`]
-    /// instead.
-    ///
-    /// [`zcash_primitives::transaction::fees::zip317::FeeRule::standard()`]: crate::transaction::fees::zip317::FeeRule::standard
-    /// [ZIP 317]: https://zips.z.cash/zip-0317
-    #[deprecated(
-        since = "0.12.0",
-        note = "To calculate the ZIP 317 fee, use `transaction::fees::zip317::FeeRule::standard()`. For a fixed fee, use the `non_standard` constructor."
-    )]
-    pub fn standard() -> Self {
-        Self {
-            fixed_fee: zip317::MINIMUM_FEE,
-        }
     }
 
     /// Returns the fixed fee amount which this rule was configured.
@@ -46,7 +35,8 @@ impl FeeRule {
 }
 
 impl super::FeeRule for FeeRule {
-    type Error = std::convert::Infallible;
+    type Error = Infallible;
+    type FeeRuleOrBalanceError = BalanceError;
 
     fn fee_required<P: consensus::Parameters>(
         &self,
@@ -59,6 +49,18 @@ impl super::FeeRule for FeeRule {
         _orchard_action_count: usize,
     ) -> Result<NonNegativeAmount, Self::Error> {
         Ok(self.fixed_fee)
+    }
+
+    fn default_dust_threshold(&self) -> NonNegativeAmount {
+        self.fixed_fee
+    }
+
+    fn marginal_fee(&self) -> NonNegativeAmount {
+        NonNegativeAmount::ZERO
+    }
+
+    fn grace_actions(&self) -> usize {
+        0
     }
 }
 
