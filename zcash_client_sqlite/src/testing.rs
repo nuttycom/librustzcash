@@ -4,7 +4,7 @@ use tempfile::NamedTempFile;
 
 use zcash_client_backend::{
     data_api::testing::{NoteCommitments, TestCache},
-    proto::compact_formats::CompactBlock
+    proto::compact_formats::CompactBlock,
 };
 
 use crate::{chain::init::init_cache_database, error::SqliteClientError};

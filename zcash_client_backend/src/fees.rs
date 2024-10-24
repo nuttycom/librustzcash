@@ -19,6 +19,7 @@ pub mod common;
 #[deprecated(
     note = "Using this fixed fee calculation violates ZIP 317, and transactions built with it will likely fail. Use `zip317` instead."
 )]
+#[cfg(feature = "non-standard-fees")]
 pub mod fixed;
 #[cfg(feature = "orchard")]
 pub mod orchard;

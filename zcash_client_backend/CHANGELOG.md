@@ -15,6 +15,10 @@ and this library adheres to Rust's notion of
   - `impl Default for wallet::input_selection::GreedyInputSelector`
 - `zcash_client_backend::fees::SplitPolicy`
 - `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy`
+- `zcash_client_backend::fees::standard::MultiOutputChangeStrategy`
+- A new feature flag, `non-standard-fees`, has been added. This flag is now
+  required in order to make use of any types or methods that enable non-standard
+  fee calculation.
 
 ### Changed
 - MSRV is now 1.77.0.
@@ -66,7 +70,8 @@ and this library adheres to Rust's notion of
   `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
 
 ### Deprecated
-- `zcash_client_backend::data_api::fees::fixed`
+- `zcash_client_backend::data_api::fees::fixed`; also, this module is now
+  available only via the use of the `non-standard-fees` feature flag.
 
 ### Removed
 - `zcash_client_backend::data_api`:
