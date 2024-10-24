@@ -15,7 +15,10 @@ use zcash_protocol::{PoolType, ShieldedProtocol};
 
 use crate::data_api::InputSource;
 
-pub(crate) mod common;
+pub mod common;
+#[deprecated(
+    note = "Using this fixed fee calculation violates ZIP 317, and transactions built with it will likely fail. Use `zip317` instead."
+)]
 pub mod fixed;
 #[cfg(feature = "orchard")]
 pub mod orchard;

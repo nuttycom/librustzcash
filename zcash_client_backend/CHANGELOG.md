@@ -65,6 +65,9 @@ and this library adheres to Rust's notion of
   `ProposalDecodingError::FeeRuleNotSpecified` has been removed, and
   `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
 
+### Deprecated
+- `zcash_client_backend::data_api::fees::fixed`
+
 ### Removed
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
