@@ -11,6 +11,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::testing`:
   - `struct transparent::GapLimits`
   - `transparent::gap_limits` high-level test for gap limit handling
+- `zcash_client_backend::data_api::{TransactionStatusFilter, OutputStatusFilter}`
 
 ### Changed
 - `zcash_client_backend::data_api::WalletRead`:
@@ -27,6 +28,9 @@ and this library adheres to Rust's notion of
   - has added method `get_address_for_index`
   - `get_next_available_address` now returns the diversifier index at which the
     address was generated in addition to the address.
+  - `TransactionDataRequest::SpendsFromAddress` has been renamed to
+    `TransactionDataRequest::TransactionsInvolvingAddress` and has added struct
+    fields `request_at`, `tx_status_filter`, and `output_status_filter`.
 
 ### Removed
 - `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured
