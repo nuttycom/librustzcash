@@ -6239,6 +6239,7 @@ dependencies = [
  "pasta_curves",
  "proptest",
  "prost",
+ "rand",
  "rand_chacha",
  "rand_core",
  "regex",

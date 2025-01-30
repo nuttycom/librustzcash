@@ -37,7 +37,7 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 use crate::{
     error::SqliteClientError,
     util::testing::FixedClock,
-    wallet::init::{init_wallet_db, init_wallet_db_internal},
+    wallet::init::testing::{init_wallet_db, init_wallet_db_internal},
     AccountUuid, WalletDb,
 };
 

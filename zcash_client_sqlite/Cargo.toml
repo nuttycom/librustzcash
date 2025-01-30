@@ -80,6 +80,8 @@ regex = "1.4"
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
 maybe-rayon.workspace = true
+rand_core.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 ambassador.workspace = true

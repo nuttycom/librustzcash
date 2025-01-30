@@ -279,7 +279,7 @@ mod tests {
 
     use crate::{
         testing::db::test_clock,
-        wallet::init::{init_wallet_db_internal, migrations::addresses_table},
+        wallet::init::{migrations::addresses_table, testing::init_wallet_db_internal},
         WalletDb,
     };
 

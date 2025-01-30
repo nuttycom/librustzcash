@@ -63,7 +63,6 @@ use std::{
     hash::Hash,
     io,
     num::{NonZeroU32, TryFromIntError},
-    time::Instant,
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
@@ -98,6 +97,7 @@ use crate::{
 use {
     crate::wallet::TransparentAddressMetadata,
     std::ops::Range,
+    std::time::Instant,
     transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
 };
 

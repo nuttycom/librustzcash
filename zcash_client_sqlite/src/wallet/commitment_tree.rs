@@ -1131,7 +1131,7 @@ mod tests {
     use super::SqliteShardStore;
     use crate::{
         testing::{db::test_clock, pool::ShieldedPoolPersistence},
-        wallet::init::init_wallet_db,
+        wallet::init::testing::init_wallet_db,
         WalletDb,
     };
 
@@ -1239,7 +1239,7 @@ mod tests {
     fn put_shard_roots<T: ShieldedPoolTester + ShieldedPoolPersistence>() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =
-            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock).unwrap();
+            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock()).unwrap();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();

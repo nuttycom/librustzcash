@@ -159,6 +159,9 @@ pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 /// 2^32 - (date --date "Oct 28, 2016 07:56 UTC" +%s)
 pub(crate) const MIN_SHIELDED_DIVERSIFIER_OFFSET: u64 = 2817325936;
 
+/// The default interval between transparent address UTXO retrieval checks, in seconds.
+pub(crate) const DEFAULT_TRANSPARENT_CHECK_INTERVAL: u64 = 600;
+
 fn parse_account_source(
     account_kind: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,

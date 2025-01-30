@@ -83,7 +83,9 @@ mod tests {
     use zip32::AccountId;
 
     use super::{DEPENDENCIES, MIGRATION_ID};
-    use crate::{testing::db::test_clock, wallet::init::init_wallet_db_internal, WalletDb};
+    use crate::{
+        testing::db::test_clock, wallet::init::testing::init_wallet_db_internal, WalletDb,
+    };
 
     #[test]
     fn migrate() {
