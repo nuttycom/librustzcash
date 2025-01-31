@@ -1,13 +1,9 @@
 //! Add support for general transparent gap limit handling, and unify the `addresses` and
 //! `ephemeral_addresses` tables.
 
-use rand::Rng as _;
 use rand_core::RngCore;
-use std::{
-    collections::HashSet,
-    sync::{Arc, RwLock},
-    time::{Duration, SystemTime},
-};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use rusqlite::{named_params, Transaction};
@@ -32,7 +28,7 @@ use {
     crate::{
         wallet::{
             decode_diversifier_index_be, encode_diversifier_index_be,
-            transparent::generate_gap_addresses,
+            transparent::{epoch_seconds, generate_gap_addresses, next_check_time},
         },
         GapLimits,
     },
@@ -48,8 +44,8 @@ const DEPENDENCIES: &[Uuid] = &[add_account_uuids::MIGRATION_ID];
 
 pub(super) struct Migration<P, C, R> {
     pub(super) params: P,
-    pub(super) clock: C,
-    pub(super) rng: Arc<RwLock<R>>,
+    pub(super) _clock: C,
+    pub(super) _rng: Arc<Mutex<R>>,
 }
 
 impl<P, C, R> schemerz::Migration<Uuid> for Migration<P, C, R> {
@@ -79,30 +75,6 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             })
         };
 
-        // Compute a next check time for the address such that its expected value is the default
-        // transparent check interval from the current time. If we wanted an actual normal
-        // distribution, we could generate a few more samples and then divide, but is there any
-        // real value given our use case here?
-        // https://www.johndcook.com/blog/2009/02/12/sums-of-uniform-random-values/
-        let start_time = self.clock.now();
-        let next_check = || {
-            {
-                let mut rng = self
-                    .rng
-                    .write()
-                    .expect("can obtain write lock to shared rng");
-                start_time
-                    + Duration::new(
-                        rng.gen_range(0..DEFAULT_TRANSPARENT_CHECK_INTERVAL)
-                            + rng.gen_range(0..DEFAULT_TRANSPARENT_CHECK_INTERVAL),
-                        0,
-                    )
-            }
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("epoch time is valid")
-            .as_secs()
-        };
-
         let external_scope_code = KeyScope::EXTERNAL.encode();
 
         conn.execute_batch(&format!(
@@ -114,8 +86,8 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             ALTER TABLE addresses
               ADD COLUMN transparent_receiver_check_interval INTEGER NOT NULL
               DEFAULT {DEFAULT_TRANSPARENT_CHECK_INTERVAL};
-            ALTER TABLE addresses ADD COLUMN transparent_receiver_last_check INTEGER;
-            ALTER TABLE addresses ADD COLUMN transparent_receiver_next_check INTEGER;
+            ALTER TABLE addresses ADD COLUMN transparent_receiver_last_check_height INTEGER;
+            ALTER TABLE addresses ADD COLUMN transparent_receiver_next_check_time INTEGER;
             "#
         ))?;
 
@@ -225,7 +197,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     update_without_taddr()?;
                 }
             }
-        }
+        };
 
         // We now have to re-create the `addresses` table in order to fix the constraints. Note
         // that we do not include the `seen_in_tx` column as this is duplicative of information
@@ -244,9 +216,8 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 cached_transparent_receiver_address TEXT,
                 exposed_at_height INTEGER,
                 receiver_flags INTEGER NOT NULL,
-                transparent_receiver_check_interval INTEGER NOT NULL DEFAULT 600,
-                transparent_receiver_last_check INTEGER,
-                transparent_receiver_next_check INTEGER,
+                transparent_receiver_last_check_height INTEGER,
+                transparent_receiver_next_check_time INTEGER,
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
                 CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
                 CONSTRAINT transparent_index_consistency CHECK (
@@ -258,12 +229,13 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 account_id, key_scope, diversifier_index_be, address,
                 transparent_child_index, cached_transparent_receiver_address,
                 exposed_at_height, receiver_flags,
+                transparent_receiver_next_check_time
             )
             SELECT
                 account_id, key_scope, diversifier_index_be, address,
                 transparent_child_index, cached_transparent_receiver_address,
                 exposed_at_height, receiver_flags,
-                transparent_receiver_next_check
+                transparent_receiver_next_check_time
             FROM addresses;
             "#)?;
 
@@ -276,12 +248,12 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     account_id, key_scope, diversifier_index_be, address,
                     transparent_child_index, cached_transparent_receiver_address,
                     exposed_at_height, receiver_flags,
-                    transparent_receiver_next_check
+                    transparent_receiver_next_check_time
                 ) VALUES (
                     :account_id, :key_scope, :diversifier_index_be, :address,
                     :transparent_child_index, :cached_transparent_receiver_address,
                     :exposed_at_height, :receiver_flags,
-                    :transparent_receiver_next_check
+                    :transparent_receiver_next_check_time
                 )
                 "#,
             )?;
@@ -295,22 +267,59 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 LEFT OUTER JOIN transactions t ON t.id_tx = ea.used_in_tx
                 "#,
             )?;
-            let mut rows =
-                ea_query.query(named_params! {":expiry_delta": DEFAULT_TX_EXPIRY_DELTA })?;
-            while let Some(row) = rows.next()? {
-                let account_id: i64 = row.get("account_id")?;
-                let transparent_child_index = row.get::<_, i64>("address_index")?;
-                let diversifier_index = DiversifierIndex::from(
-                    u32::try_from(transparent_child_index)
-                        .ok()
-                        .and_then(NonHardenedChildIndex::from_index)
-                        .ok_or(WalletMigrationError::CorruptedData(
-                            "ephermeral address indices must be in the range of `u31`".to_owned(),
-                        ))?
-                        .index(),
-                );
-                let address: String = row.get("address")?;
-                let exposed_at_height: Option<i64> = row.get("exposed_at_height")?;
+            let mut rows = ea_query
+                .query_and_then(
+                    named_params! {":expiry_delta": DEFAULT_TX_EXPIRY_DELTA },
+                    |row| {
+                        let account_id: i64 = row.get("account_id")?;
+                        let transparent_child_index = row.get::<_, i64>("address_index")?;
+                        let diversifier_index = DiversifierIndex::from(
+                            u32::try_from(transparent_child_index)
+                                .ok()
+                                .and_then(NonHardenedChildIndex::from_index)
+                                .ok_or(WalletMigrationError::CorruptedData(
+                                    "ephermeral address indices must be in the range of `u31`"
+                                        .to_owned(),
+                                ))?
+                                .index(),
+                        );
+                        let address: String = row.get("address")?;
+                        let exposed_at_height: Option<i64> = row.get("exposed_at_height")?;
+                        Ok((
+                            account_id,
+                            diversifier_index,
+                            transparent_child_index,
+                            address,
+                            exposed_at_height,
+                        ))
+                    },
+                )?
+                .collect::<Result<Vec<_>, WalletMigrationError>>()?;
+
+            let total_ephemeral_addresses =
+                u32::try_from(rows.len()).expect("number of ephemeral addrs fits into u32");
+            let mut check_time = self._clock.now();
+            for (
+                account_id,
+                diversifier_index,
+                transparent_child_index,
+                address,
+                exposed_at_height,
+            ) in rows
+            {
+                // Compute a next check time for the address such that, when considered in the
+                // context of all other allocated ephemeral addresses, it will be checked once per
+                // day.
+                let next_check_time = {
+                    let rng = self
+                        ._rng
+                        .lock()
+                        .expect("can obtain write lock to shared rng");
+
+                    next_check_time(rng, check_time, (24 * 60 * 60) / total_ephemeral_addresses)
+                        .expect("computed next check time is valid")
+                };
+                let next_check_epoch_seconds = epoch_seconds(next_check_time).unwrap();
 
                 // We set both the `address` column and the `cached_transparent_receiver_address`
                 // column to the same value here; there is no Unified address that corresponds to
@@ -324,10 +333,11 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     ":cached_transparent_receiver_address": address,
                     ":exposed_at_height": exposed_at_height,
                     ":receiver_flags": ReceiverFlags::P2PKH.bits(),
-                    ":transparent_receiver_next_check": next_check()
+                    ":transparent_receiver_next_check_time": next_check_epoch_seconds
                 })?;
 
                 account_ids.insert(account_id);
+                check_time = next_check_time;
             }
         }
 

@@ -97,7 +97,7 @@ use crate::{
 use {
     crate::wallet::TransparentAddressMetadata,
     std::ops::Range,
-    std::time::Instant,
+    std::time::SystemTime,
     transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
 };
 
@@ -783,7 +783,7 @@ pub enum TransactionDataRequest {
         /// correlations between addresses to untrusted parties; for example, a wallet application
         /// that uses a private, trusted-for-privacy supplier of chain data can safely ignore this
         /// field.
-        request_at: Option<Instant>,
+        request_at: Option<SystemTime>,
         /// The caller should respond to this request only with transactions that have conform to
         /// the specified transaction status filter.
         tx_status_filter: TransactionStatusFilter,

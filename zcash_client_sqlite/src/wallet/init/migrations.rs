@@ -35,7 +35,7 @@ mod wallet_summaries;
 
 use std::{
     rc::Rc,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
 };
 
 use rand_core::RngCore;
@@ -102,7 +102,7 @@ pub(super) fn all_migrations<
     //                          fix_bad_change_flagging     v_transactions_additional_totals
     //                                                                 |
     //                                                     transparent_gap_limit_handling
-    let rng = Arc::new(RwLock::new(rng));
+    let rng = Arc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -169,8 +169,8 @@ pub(super) fn all_migrations<
         Box::new(v_transactions_additional_totals::Migration),
         Box::new(transparent_gap_limit_handling::Migration {
             params: params.clone(),
-            clock: clock.clone(),
-            rng: rng.clone(),
+            _clock: clock.clone(),
+            _rng: rng.clone(),
         }),
     ]
 }

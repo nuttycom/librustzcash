@@ -1,8 +1,14 @@
 //! Functions for transparent input support in the wallet.
+use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet};
+use std::num::TryFromIntError;
+use std::ops::DerefMut;
 use std::rc::Rc;
+use std::time::{Duration, SystemTime, SystemTimeError};
 
 use nonempty::NonEmpty;
+use rand::{Rng, RngCore};
+use rand_distr::Distribution;
 use rusqlite::types::Value;
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
@@ -37,10 +43,14 @@ use super::{
     account_birthday_internal, chain_tip_height, decode_diversifier_index_be,
     encode_diversifier_index_be, get_account_ids, get_account_internal, KeyScope,
 };
+use crate::util::Clock;
 use crate::{error::SqliteClientError, AccountUuid, TxRef, UtxoId};
 use crate::{AccountRef, AddressRef, GapLimits};
 
 pub(crate) mod ephemeral;
+
+/// The default interval between transparent address UTXO/interaction retrieval checks, in seconds.
+pub(crate) const DEFAULT_EPHEMERAL_CHECK_INTERVAL: u64 = 600;
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
@@ -1009,6 +1019,51 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     )
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum SchedulingError {
+    Distribution(rand_distr::ExpError),
+    Time(SystemTimeError),
+    OutOfRange(TryFromIntError),
+}
+
+impl From<rand_distr::ExpError> for SchedulingError {
+    fn from(value: rand_distr::ExpError) -> Self {
+        SchedulingError::Distribution(value)
+    }
+}
+
+impl From<SystemTimeError> for SchedulingError {
+    fn from(value: SystemTimeError) -> Self {
+        SchedulingError::Time(value)
+    }
+}
+
+impl From<TryFromIntError> for SchedulingError {
+    fn from(value: TryFromIntError) -> Self {
+        SchedulingError::OutOfRange(value)
+    }
+}
+
+pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
+    mut rng: D,
+    from_event: SystemTime,
+    check_interval_seconds: u32,
+) -> Result<SystemTime, SchedulingError> {
+    // A λ parameter of 1/check_interval_seconds will result in a distribution with an expected
+    // value of `check_interval_seconds`.
+    let dist = rand_distr::Exp::new(1.0 / f64::from(check_interval_seconds))?;
+    let event_delay = dist.sample(rng.deref_mut()).round() as u64;
+
+    Ok(from_event + Duration::new(event_delay, 0))
+}
+
+pub(crate) fn epoch_seconds(t: SystemTime) -> Result<i64, SchedulingError> {
+    let integer_seconds_since_epoch =
+        i64::try_from(t.duration_since(SystemTime::UNIX_EPOCH)?.as_secs())?;
+
+    Ok(integer_seconds_since_epoch)
+}
+
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
 /// wallet backend in order to be able to present a complete view of wallet history and memo data.
 pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
@@ -1023,19 +1078,32 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     // We cannot construct address-based transaction data requests for the case where we cannot
     // determine the height at which to begin, so we require that either the target height or mined
     // height be set.
-    let mut address_request_stmt = conn.prepare_cached(
-        "SELECT ssq.address, IFNULL(t.target_height, t.mined_height)
+    let mut spend_requests_stmt = conn.prepare_cached(
+        "SELECT
+            ssq.address,
+            IFNULL(t.target_height, t.mined_height),
+            a.transparent_receiver_next_check
          FROM transparent_spend_search_queue ssq
          JOIN transactions t ON t.id_tx = ssq.transaction_id
+         LEFT OUTER JOIN addresses a ON a.cached_transparent_receiver_address = ssq.address
          WHERE t.target_height IS NOT NULL
          OR t.mined_height IS NOT NULL",
     )?;
 
-    let result = address_request_stmt
+    let spend_search_rows = spend_requests_stmt
         .query_and_then([], |row| {
             let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
             let block_range_start = BlockHeight::from(row.get::<_, u32>(1)?);
             let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
+            let request_at = row
+                .get::<_, Option<i64>>(2)?
+                .map(|t| {
+                    let timestamp = u64::try_from(t).map_err(|_| {
+                        SqliteClientError::CorruptedData(format!("Invalid timestamp: {}", t))
+                    })?;
+                    Ok::<_, SqliteClientError>(SystemTime::UNIX_EPOCH + Duration::new(timestamp, 0))
+                })
+                .transpose()?;
 
             Ok::<TransactionDataRequest, SqliteClientError>(
                 TransactionDataRequest::TransactionsInvolvingAddress {
@@ -1045,7 +1113,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
                         chain_tip_height
                             .map_or(max_end_height, |h| std::cmp::min(h + 1, max_end_height)),
                     ),
-                    request_at: None,
+                    request_at,
                     tx_status_filter: TransactionStatusFilter::Mined,
                     output_status_filter: OutputStatusFilter::All,
                 },
@@ -1053,7 +1121,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(result)
+    Ok(spend_search_rows)
 }
 
 pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
