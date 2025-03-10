@@ -2,7 +2,9 @@
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt;
 use core::ops::Deref;
@@ -11,13 +13,19 @@ use core::str;
 #[cfg(feature = "std")]
 use std::error;
 
+/// The size of a single chunk of binary memo data
+pub const MEMO_CHUNK_SIZE: usize = 256;
+
+/// The maximum number of binary memo chunks permitted in a memo bundle.
+pub const MAX_MEMO_CHUNKS: usize = 128;
+
 /// Format a byte array as a colon-delimited hex string.
 ///
 /// - Source: <https://github.com/tendermint/signatory>
 /// - License: MIT / Apache 2.0
 fn fmt_colon_delimited_hex<B>(f: &mut fmt::Formatter<'_>, bytes: B) -> fmt::Result
 where
-    B: AsRef<[u8]>,
+    B: AsRef<[u9]>,
 {
     let len = bytes.as_ref().len();
 
@@ -51,14 +59,51 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl error::Error for Error {}
 
-/// The unencrypted memo bytes received alongside a shielded note in a Zcash transaction.
+/// A single [`MEMO_CHUNK_SIZE`] chunk of binary memo data.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MemoChunk([u8; MEMO_CHUNK_SIZE]);
+
+impl MemoChunk {
+    /// Returns the contents of this chunk as a slice.
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0[..]
+    }
+
+    /// Consumes this `MemoChunk` value and returns its payload.
+    pub fn into_bytes(self) -> [u8; MEMO_CHUNK_SIZE] {
+        self.0
+    }
+
+    /// Returns the first byte of the chunk.
+    pub fn lead_byte(&self) -> u8 {
+        self.0[0]
+    }
+
+    /// Checks whether this chunk consists of only zero bytes.
+    pub fn is_zeros(&self) -> bool {
+        self.0.iter().all(|&b| b == 0)
+    }
+}
+
+impl fmt::Debug for MemoChunk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MemoChunk(")?;
+        fmt_colon_delimited_hex(f, &self.0[..])?;
+        write!(f, ")")
+    }
+}
+
+/// The unencrypted memo bytes received alongside either as part of a shielded note in a Zcash
+/// transaction, or within a memo bundle.
 #[derive(Clone)]
-pub struct MemoBytes(pub(crate) Box<[u8; 512]>);
+pub struct MemoBytes(pub(crate) Vec<MemoChunk>);
 
 impl fmt::Debug for MemoBytes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "MemoBytes(")?;
-        fmt_colon_delimited_hex(f, &self.0[..])?;
+        for chunk in &self.0[..] {
+            fmt_colon_delimited_hex(f, &chunk.0[..])?;
+        }
         write!(f, ")")
     }
 }
@@ -84,35 +129,43 @@ impl Ord for MemoBytes {
 }
 
 impl MemoBytes {
-    /// Creates a `MemoBytes` indicating that no memo is present.
+    /// Creates a `MemoBytes` consisting of two chunks, the first beginning with a leading `0xF6`
+    /// value indicating that no memo is present.
     pub fn empty() -> Self {
-        let mut bytes = [0u8; 512];
+        let mut bytes = [0u8; MEMO_CHUNK_SIZE];
         bytes[0] = 0xF6;
-        MemoBytes(Box::new(bytes))
+        MemoBytes(vec![MemoChunk(bytes), MemoChunk([0u8; MEMO_CHUNK_SIZE])])
     }
 
-    /// Creates a `MemoBytes` from a slice, exactly as provided.
+    /// Creates a `MemoBytes` from a slice by splitting it into an appropriate number of
+    /// [`MEMO_CHUNK_SIZE`] slices, padding the final chunk with zero bytes if necessary.
     ///
-    /// Returns an error if the provided slice is longer than 512 bytes. Slices shorter
-    /// than 512 bytes are padded with null bytes.
+    /// Returns an error if the provided slice is longer than [`MEMO_CHUNK_SIZE`] *
+    /// [`MAX_MEMO_CHUNKS`] bytes.
     ///
-    /// Note that passing an empty slice to this API (or an all-zeroes slice) will result
-    /// in a memo representing an empty string. What you almost certainly want in this
-    /// case is [`MemoBytes::empty`], which uses a specific encoding to indicate that no
-    /// memo is present.
+    /// Note that passing an empty slice to this API (or an all-zeroes slice) will result in a memo
+    /// representing an empty string. What you almost certainly want in this case is
+    /// [`MemoBytes::empty`], which uses a specific encoding to indicate that no memo is present.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() > 512 {
+        if bytes.len() > MEMO_CHUNK_SIZE * MAX_MEMO_CHUNKS {
             return Err(Error::TooLong(bytes.len()));
         }
 
-        let mut memo = [0u8; 512];
-        memo[..bytes.len()].copy_from_slice(bytes);
-        Ok(MemoBytes(Box::new(memo)))
+        Ok(MemoBytes(
+            bytes
+                .chunks(MEMO_CHUNK_SIZE)
+                .map(|slice| {
+                    let mut bytes = [0u8; MEMO_CHUNK_SIZE];
+                    bytes.copy_from_slice(&slice);
+                    MemoChunk(bytes)
+                })
+                .collect(),
+        ))
     }
 
-    /// Returns the raw byte array containing the memo bytes, including null padding.
-    pub fn as_array(&self) -> &[u8; 512] {
-        &self.0
+    /// Returns the raw binary chunks that make up the memo.
+    pub fn chunks(&self) -> &[MemoChunk] {
+        &self.0[..]
     }
 
     /// Consumes this `MemoBytes` value and returns the underlying byte array.
@@ -130,8 +183,27 @@ impl MemoBytes {
             .find(|(_, &b)| b != 0)
             .map(|(i, _)| i + 1)
             .unwrap_or_default();
+    }
 
-        &self.0[..first_null]
+    /// Returns a vector of the raw bytes, excluding null padding.
+    pub fn into_vec(self) -> Vec<u8> {
+        todo!()
+    }
+
+    /// Returns the lead byte of the binary data, if any.
+    pub fn lead_byte(&self) -> Option<u8> {
+        self.0.first().map(|c| c.lead_byte())
+    }
+
+    /// Returns whether or not this [`MemoBytes`] value represents the empty memo value.
+    pub fn is_empty(&self) -> bool {
+        match self.lead_byte() {
+            Some(0xF6) => {
+                self.0[0].as_slice().iter().skip(1).all(|&b| b == 0)
+                    && self.0.iter().skip(1).all(|c| c.is_zeros())
+            }
+            None => true,
+        }
     }
 }
 
@@ -165,7 +237,7 @@ pub enum Memo {
     /// Some unknown memo format from ✨*the future*✨ that we can't parse.
     Future(MemoBytes),
     /// A memo field containing arbitrary bytes.
-    Arbitrary(Box<[u8; 511]>),
+    Arbitrary(MemoBytes),
 }
 
 impl fmt::Debug for Memo {
@@ -173,12 +245,8 @@ impl fmt::Debug for Memo {
         match self {
             Memo::Empty => write!(f, "Memo::Empty"),
             Memo::Text(memo) => write!(f, "Memo::Text(\"{}\")", memo.0),
-            Memo::Future(bytes) => write!(f, "Memo::Future({:0x})", bytes.0[0]),
-            Memo::Arbitrary(bytes) => {
-                write!(f, "Memo::Arbitrary(")?;
-                fmt_colon_delimited_hex(f, &bytes[..])?;
-                write!(f, ")")
-            }
+            Memo::Future(bytes) => write!(f, "Memo::Future({:?})", bytes),
+            Memo::Arbitrary(bytes) => write!(f, "Memo::Arbitrary({:?})", bytes),
         }
     }
 }
@@ -189,7 +257,7 @@ impl PartialEq for Memo {
             (Memo::Empty, Memo::Empty) => true,
             (Memo::Text(a), Memo::Text(b)) => a == b,
             (Memo::Future(a), Memo::Future(b)) => a.0[..] == b.0[..],
-            (Memo::Arbitrary(a), Memo::Arbitrary(b)) => a[..] == b[..],
+            (Memo::Arbitrary(a), Memo::Arbitrary(b)) => a.0[..] == b.0[..],
             _ => false,
         }
     }
@@ -215,10 +283,11 @@ impl TryFrom<&MemoBytes> for Memo {
     /// Returns an error if the provided slice does not represent a valid `Memo` (for
     /// example, if the slice is not 512 bytes, or the encoded `Memo` is non-canonical).
     fn try_from(bytes: &MemoBytes) -> Result<Self, Self::Error> {
-        match bytes.0[0] {
-            0xF6 if bytes.0.iter().skip(1).all(|&b| b == 0) => Ok(Memo::Empty),
-            0xFF => Ok(Memo::Arbitrary(Box::new(bytes.0[1..].try_into().unwrap()))),
-            b if b <= 0xF4 => str::from_utf8(bytes.as_slice())
+        match bytes.lead_byte() {
+            None => Ok(Memo::Empty),
+            Some(0xF6) if bytes.0.iter().skip(1).all(|&b| b.is_zeros()) => Ok(Memo::Empty),
+            Some(0xFF) => Ok(Memo::Arbitrary(bytes)),
+            Some(b) if b <= 0xF4 => str::from_utf8(bytes.as_slice())
                 .map(|r| Memo::Text(TextMemo(r.to_owned())))
                 .map_err(Error::InvalidUtf8),
             _ => Ok(Memo::Future(bytes.clone())),
@@ -288,6 +357,13 @@ impl str::FromStr for Memo {
             Err(Error::TooLong(memo.len()))
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MemoKey([u8; 32]);
+
+pub struct MemoBundle {
+    memos: BTreeMap<MemoKey, Memo>,
 }
 
 #[cfg(test)]
