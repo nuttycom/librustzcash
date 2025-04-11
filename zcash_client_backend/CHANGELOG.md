@@ -20,6 +20,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::tor`:
   - `Client::set_dormant`
   - `DormantMode`
+- `zcash_client_backend::data_api::AccountBirthday::from_parts`
 
 ### Changed
 - `zcash_client_backend::data_api`:
