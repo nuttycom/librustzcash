@@ -87,6 +87,9 @@ use {
     ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
+#[cfg(feature = "zcashd-compat")]
+use zcash_keys::keys::zcashd;
+
 pub mod pool;
 pub mod sapling;
 
@@ -1699,13 +1702,16 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
                     .import_account_hd("", &seed, index, &birthday, None)
-                    .unwrap(),
+                    .expect("test account import succeeds"),
                 None => {
                     let result = wallet_data
                         .create_account("", &seed, &birthday, None)
-                        .unwrap();
+                        .expect("test account creation succeeds");
                     (
-                        wallet_data.get_account(result.0).unwrap().unwrap(),
+                        wallet_data
+                            .get_account(result.0)
+                            .expect("retrieval of just-created account succeeds")
+                            .expect("an account was created"),
                         result.1,
                     )
                 }
@@ -2534,6 +2540,7 @@ impl WalletRead for MockWalletDb {
         &self,
         _seed: &SeedFingerprint,
         _account_id: zip32::AccountId,
+        #[cfg(feature = "zcashd-compat")] _legacy_address_index: Option<zcashd::LegacyAddressIndex>,
     ) -> Result<Option<Self::Account>, Self::Error> {
         Ok(None)
     }

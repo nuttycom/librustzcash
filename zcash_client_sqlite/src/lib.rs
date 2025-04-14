@@ -106,6 +106,9 @@ use {
     zcash_keys::encoding::AddressCodec,
 };
 
+#[cfg(feature = "zcashd-compat")]
+use zcash_keys::keys::zcashd;
+
 #[cfg(feature = "multicore")]
 use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
@@ -684,8 +687,16 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         &self,
         seed: &SeedFingerprint,
         account_id: zip32::AccountId,
+        #[cfg(feature = "zcashd-compat")] legacy_address_index: Option<zcashd::LegacyAddressIndex>,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
+        wallet::get_derived_account(
+            self.conn.borrow(),
+            &self.params,
+            seed,
+            account_id,
+            #[cfg(feature = "zcashd-compat")]
+            legacy_address_index,
+        )
     }
 
     fn validate_seed(
@@ -1151,7 +1162,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        zip32_account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1190,7 +1206,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
