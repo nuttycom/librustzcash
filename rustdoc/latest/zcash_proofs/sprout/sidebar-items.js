@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["WITNESS_PATH_SIZE"],"fn":["create_proof","verify_proof"]};

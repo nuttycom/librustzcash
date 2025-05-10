@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VALID_LENGTH"],"enum":["Error"],"fn":["f4jumble","f4jumble_inv","f4jumble_inv_mut","f4jumble_mut"]};

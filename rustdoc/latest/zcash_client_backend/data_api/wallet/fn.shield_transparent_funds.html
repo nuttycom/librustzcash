@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Constructs a transaction that consumes available transparent UTXOs belonging to the specified secret key, and sends them to the most-preferred receiver of the default internal address for the provided Unified Spending Key."><title>shield_transparent_funds in zcash_client_backend::data_api::wallet - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1a91846b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.89.0-nightly (dcecb9917 2025-05-09)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../../../static.files/storage-4e99c027.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-7ef8a74a.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../zcash_client_backend/index.html">zcash_<wbr>client_<wbr>backend</a><span class="version">0.18.0</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In zcash_<wbr>client_<wbr>backend::<wbr>data_<wbr>api::<wbr>wallet</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">zcash_client_backend</a>::<wbr><a href="../index.html">data_api</a>::<wbr><a href="index.html">wallet</a></div><h1>Function <span class="fn">shield_transparent_funds</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/zcash_client_backend/data_api/wallet.rs.html#2125-2164">Source</a> </span></div><pre class="rust item-decl"><code>pub fn shield_transparent_funds&lt;DbT, ParamsT, InputsT, ChangeT&gt;(
+    wallet_db: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;mut DbT</a>,
+    params: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;ParamsT</a>,
+    spend_prover: &amp;impl SpendProver,
+    output_prover: &amp;impl OutputProver,
+    input_selector: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;InputsT</a>,
+    change_strategy: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;ChangeT</a>,
+    shielding_threshold: Zatoshis,
+    usk: &amp;<a class="struct" href="../../keys/struct.UnifiedSpendingKey.html" title="struct zcash_client_backend::keys::UnifiedSpendingKey">UnifiedSpendingKey</a>,
+    from_addrs: &amp;[TransparentAddress],
+    to_account: &lt;DbT as <a class="trait" href="../trait.InputSource.html" title="trait zcash_client_backend::data_api::InputSource">InputSource</a>&gt;::<a class="associatedtype" href="../trait.InputSource.html#associatedtype.AccountId" title="type zcash_client_backend::data_api::InputSource::AccountId">AccountId</a>,
+    min_confirmations: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;NonEmpty&lt;TxId&gt;, <a class="type" href="type.ShieldErrT.html" title="type zcash_client_backend::data_api::wallet::ShieldErrT">ShieldErrT</a>&lt;DbT, InputsT, ChangeT&gt;&gt;<div class="where">where
+    ParamsT: Parameters,
+    DbT: <a class="trait" href="../trait.WalletWrite.html" title="trait zcash_client_backend::data_api::WalletWrite">WalletWrite</a> + <a class="trait" href="../trait.WalletCommitmentTrees.html" title="trait zcash_client_backend::data_api::WalletCommitmentTrees">WalletCommitmentTrees</a> + <a class="trait" href="../trait.InputSource.html" title="trait zcash_client_backend::data_api::InputSource">InputSource</a>&lt;Error = &lt;DbT as <a class="trait" href="../trait.WalletRead.html" title="trait zcash_client_backend::data_api::WalletRead">WalletRead</a>&gt;::<a class="associatedtype" href="../trait.WalletRead.html#associatedtype.Error" title="type zcash_client_backend::data_api::WalletRead::Error">Error</a>&gt;,
+    InputsT: <a class="trait" href="input_selection/trait.ShieldingSelector.html" title="trait zcash_client_backend::data_api::wallet::input_selection::ShieldingSelector">ShieldingSelector</a>&lt;InputSource = DbT&gt;,
+    ChangeT: <a class="trait" href="../../fees/trait.ChangeStrategy.html" title="trait zcash_client_backend::fees::ChangeStrategy">ChangeStrategy</a>&lt;MetaSource = DbT&gt;,</div></code></pre><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>transparent-inputs</code></strong> only.</div></span><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Constructs a transaction that consumes available transparent UTXOs belonging to the specified
+secret key, and sends them to the most-preferred receiver of the default internal address for
+the provided Unified Spending Key.</p>
+<p>This procedure will not attempt to shield transparent funds if the total amount being shielded
+is less than the default fee to send the transaction. Fees will be paid only from the
+transparent UTXOs being consumed.</p>
+<p>Parameters:</p>
+<ul>
+<li><code>wallet_db</code>: A read/write reference to the wallet database</li>
+<li><code>params</code>: Consensus parameters</li>
+<li><code>spend_prover</code>: The <a href="sapling::prover::SpendProver"><code>sapling::SpendProver</code></a> to use in constructing the shielded
+transaction.</li>
+<li><code>output_prover</code>: The <a href="sapling::prover::OutputProver"><code>sapling::OutputProver</code></a> to use in constructing the shielded
+transaction.</li>
+<li><code>input_selector</code>: The <a href="input_selection/trait.InputSelector.html" title="trait zcash_client_backend::data_api::wallet::input_selection::InputSelector"><code>InputSelector</code></a> to for note selection and change and fee
+determination</li>
+<li><code>usk</code>: The unified spending key that will be used to detect and spend transparent UTXOs,
+and that will provide the shielded address to which funds will be sent. Funds will be
+shielded to the internal (change) address associated with the most preferred shielded
+receiver corresponding to this account, or if no shielded receiver can be used for this
+account, this function will return an error. This procedure will return an error if the
+USK does not correspond to an account known to the wallet.</li>
+<li><code>from_addrs</code>: The list of transparent addresses that will be used to filter transaparent
+UTXOs received by the wallet. Only UTXOs received at one of the provided addresses will
+be selected to be shielded.</li>
+<li><code>min_confirmations</code>: The minimum number of confirmations that a previously
+received note must have in the blockchain in order to be considered for being
+spent. A value of 10 confirmations is recommended and 0-conf transactions are
+not supported.</li>
+</ul>
+</div></details></section></div></main></body></html>

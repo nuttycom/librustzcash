@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ENTRY_SIZE","MAX_NODE_DATA_SIZE"],"enum":["EntryKind","EntryLink","Error","V1","V2"],"struct":["Entry","NodeData","Tree"],"trait":["Version"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Scope"],"mod":["arbitrary","fingerprint","hardened_only","registered"],"struct":["AccountId","ChainCode","ChildIndex","DiversifierIndex","DiversifierIndexOverflowError","TryFromIntError"]};

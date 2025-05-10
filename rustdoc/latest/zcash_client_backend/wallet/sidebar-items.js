@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Note","OvkPolicy","Recipient"],"struct":["NoteId","ReceivedNote","TransparentAddressMetadata","WalletOutput","WalletSpend","WalletTransparentOutput","WalletTx"],"type":["WalletOrchardOutput","WalletOrchardSpend","WalletSaplingOutput","WalletSaplingSpend"]};

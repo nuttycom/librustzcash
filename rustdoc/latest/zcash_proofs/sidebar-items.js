@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SAPLING_OUTPUT_NAME","SAPLING_SPEND_NAME","SPROUT_NAME"],"fn":["default_params_folder","download_parameters","download_sapling_parameters","download_sprout_parameters","load_parameters","parse_parameters"],"mod":["circuit","prover","sprout"],"struct":["SaplingParameterPaths","ZcashParameters"]};
