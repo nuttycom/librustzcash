@@ -33,8 +33,10 @@ and this library adheres to Rust's notion of
   - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`. 
     Existing calls to this function that used `Zatoshis` now use 
     `TargetValue::AtLeast(Zatoshis)`
-  - `WalletRead::get_derived_account` now takes an additional `legacy_address_index`
-    argument when the `zcashd-compat` feature flag is enabled.
+  - `WalletRead::get_derived_account` now takes a `Zip32Derivation` value
+    as its argument instead of its parts. This minimizes the API complexity
+    that would otherwise arise due to the presence of the `zcashd-compat`
+    feature flag.
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 - `zcash_client_backend::tor`:
   - `Client::{connect_to_lightwalletd, get_latest_zec_to_usd_rate}` now ensure

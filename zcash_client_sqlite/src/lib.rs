@@ -78,7 +78,6 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -106,9 +105,6 @@ use {
     zcash_keys::encoding::AddressCodec,
 };
 
-#[cfg(feature = "zcashd-compat")]
-use zcash_keys::keys::zcashd;
-
 #[cfg(feature = "multicore")]
 use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
@@ -123,7 +119,7 @@ use {
 };
 
 #[cfg(any(test, feature = "test-dependencies", feature = "transparent-inputs"))]
-use crate::wallet::encoding::KeyScope;
+use {crate::wallet::encoding::KeyScope, zcash_protocol::value::Zatoshis};
 
 #[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
@@ -685,17 +681,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn get_derived_account(
         &self,
-        seed: &SeedFingerprint,
-        account_id: zip32::AccountId,
-        #[cfg(feature = "zcashd-compat")] legacy_address_index: Option<zcashd::LegacyAddressIndex>,
+        derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_derived_account(
             self.conn.borrow(),
             &self.params,
-            seed,
-            account_id,
+            derivation.seed_fingerprint(),
+            derivation.account_index(),
             #[cfg(feature = "zcashd-compat")]
-            legacy_address_index,
+            derivation.legacy_address_index(),
         )
     }
 
@@ -1246,6 +1240,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 #[cfg(feature = "transparent-inputs")]
                 &wdb.gap_limits,
             )
+        })
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::import_standalone_transparent_pubkey(wdb.conn.0, wdb.params, account, pubkey)
         })
     }
 

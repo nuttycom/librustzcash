@@ -41,7 +41,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
@@ -51,13 +51,13 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
+        propose_standard_transfer_to_address, propose_transfer, SpendingKeys,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
     ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
     TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    SAPLING_SHARD_HEIGHT,
+    Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
 use crate::{
     data_api::TargetValue,
@@ -86,9 +86,6 @@ use {
     super::ORCHARD_SHARD_HEIGHT, crate::proto::compact_formats::CompactOrchardAction,
     ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
-
-#[cfg(feature = "zcashd-compat")]
-use zcash_keys::keys::zcashd;
 
 pub mod pool;
 pub mod sapling;
@@ -968,7 +965,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             &proposal,
         )
@@ -1104,7 +1105,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             proposal,
         )
@@ -1198,7 +1203,11 @@ where
             input_selector,
             change_strategy,
             shielding_threshold,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             from_addrs,
             to_account,
             min_confirmations,
@@ -2538,9 +2547,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_derived_account(
         &self,
-        _seed: &SeedFingerprint,
-        _account_id: zip32::AccountId,
-        #[cfg(feature = "zcashd-compat")] _legacy_address_index: Option<zcashd::LegacyAddressIndex>,
+        _derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
         Ok(None)
     }
@@ -2751,6 +2758,15 @@ impl WalletWrite for MockWalletDb {
         _purpose: AccountPurpose,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 

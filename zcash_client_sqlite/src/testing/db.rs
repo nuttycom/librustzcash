@@ -33,7 +33,7 @@ use zcash_protocol::{
     consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, value::Zatoshis,
     ShieldedProtocol,
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::DiversifierIndex;
 
 use crate::{
     error::SqliteClientError, util::testing::FixedClock, wallet::init::WalletMigrator, AccountUuid,

@@ -46,9 +46,13 @@ pub struct Key {
 }
 
 impl Key {
+    pub fn new(secret: SecretKey, compressed: bool) -> Self {
+        Self { secret, compressed }
+    }
+
     /// Decodes a base58-encoded secret key.
     ///
-    /// This corresponds to https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L282
+    /// This corresponds to <https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L282>
     pub fn decode_base58<N: NetworkConstants>(
         network: &N,
         encoded: &SecretString,
@@ -63,7 +67,7 @@ impl Key {
         let compressed = decoded_len == (33 + prefix.len());
         if (decoded_len == 32 + prefix.len()
             || (compressed && decoded.expose_secret().last() == Some(&1)))
-            && &decoded.expose_secret()[0..prefix.len()] == prefix
+            && decoded.expose_secret()[0..prefix.len()] == prefix
         {
             let key_end = decoded_len - if compressed { 1 } else { 0 };
             let bytes = PrivateKeyBytes::try_from(&decoded.expose_secret()[prefix.len()..key_end])?;
@@ -78,7 +82,7 @@ impl Key {
 
     /// Decodes a base58-encoded secret key.
     ///
-    /// This corresponds to https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298
+    /// This corresponds to <https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298>
     pub fn encode_base58<N: NetworkConstants>(&self, network: &N) -> SecretString {
         let input = SecretVec::new(
             network
@@ -137,7 +141,7 @@ impl Key {
         //        *seckeylen = 0;
         //        return 0;
         //    }
-        let keypair = self.secret().keypair(&secp);
+        let keypair = self.secret().keypair(secp);
 
         if self.compressed {
             let begin = [0x30, 0x81, 0xD3, 0x02, 0x01, 0x01, 0x04, 0x20];
@@ -243,7 +247,7 @@ impl Key {
         }
         let lenb = usize::from(seckey[0] & !0x80);
         let seckey = &seckey[1..];
-        if lenb < 1 || lenb > 2 {
+        if !(1..=2).contains(&lenb) {
             return Err(());
         }
         if seckey.len() < lenb {
