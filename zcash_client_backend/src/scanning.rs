@@ -507,26 +507,23 @@ where
 type TaggedSaplingBatch<IvkTag> = Batch<
     IvkTag,
     SaplingDomain,
-    sapling::note_encryption::CompactOutputDescription,
-    CompactDecryptor,
+    CompactDecryptor<sapling::note_encryption::CompactOutputDescription>,
 >;
 type TaggedSaplingBatchRunner<IvkTag, Tasks> = BatchRunner<
     IvkTag,
     SaplingDomain,
-    sapling::note_encryption::CompactOutputDescription,
-    CompactDecryptor,
+    CompactDecryptor<sapling::note_encryption::CompactOutputDescription>,
     Tasks,
 >;
 
 #[cfg(feature = "orchard")]
 type TaggedOrchardBatch<IvkTag> =
-    Batch<IvkTag, OrchardDomain, orchard::note_encryption::CompactAction, CompactDecryptor>;
+    Batch<IvkTag, OrchardDomain, CompactDecryptor<orchard::note_encryption::CompactAction>>;
 #[cfg(feature = "orchard")]
 type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     IvkTag,
     OrchardDomain,
-    orchard::note_encryption::CompactAction,
-    CompactDecryptor,
+    CompactDecryptor<orchard::note_encryption::CompactAction>,
     Tasks,
 >;
 

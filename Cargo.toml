@@ -217,3 +217,8 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+zcash_note_encryption = { git = "https://github.com/zcash/zcash_note_encryption", rev = "19003049cfd0f138bde086de09bd036c0ddc6322" }
+orchard = { git = "https://github.com/zcash/orchard", rev = "4ce936527a970c26d9c4492e7924da1c5f36651b" }
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto", rev = "b598a299e1f3489f5fd8892a8437e1ca5cdc6b4d" }

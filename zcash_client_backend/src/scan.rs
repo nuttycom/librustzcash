@@ -1,6 +1,7 @@
 use crossbeam_channel as channel;
 use std::collections::HashMap;
 use std::fmt;
+use std::marker::PhantomData;
 use std::mem;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -9,7 +10,8 @@ use std::sync::{
 
 use memuse::DynamicUsage;
 use zcash_note_encryption::{
-    batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
+    batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE,
+    ENC_CIPHERTEXT_SIZE,
 };
 use zcash_primitives::{block::BlockHash, transaction::TxId};
 
@@ -44,29 +46,31 @@ where
 }
 
 /// A decryptor of transaction outputs.
-pub(crate) trait Decryptor<D: BatchDomain, Output> {
+pub(crate) trait Decryptor<D: BatchDomain> {
+    type Output;
     type Memo;
 
     fn batch_decrypt<IvkTag: Clone>(
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
-        outputs: &[(D, Output)],
+        outputs: &[(D, Self::Output)],
     ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
 }
 
 /// A decryptor of outputs as encoded in transactions.
 #[allow(dead_code)]
-pub(crate) struct FullDecryptor;
+pub(crate) struct FullDecryptor<Output> {
+    _phantom: PhantomData<Output>,
+}
 
-impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D, Output>
-    for FullDecryptor
-{
+impl<D: BatchDomain, O: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D> for FullDecryptor<O> {
+    type Output = O;
     type Memo = D::Memo;
 
     fn batch_decrypt<IvkTag: Clone>(
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
-        outputs: &[(D, Output)],
+        outputs: &[(D, Self::Output)],
     ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_note_decryption(ivks, outputs)
             .into_iter()
@@ -82,17 +86,18 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D
 }
 
 /// A decryptor of outputs as encoded in compact blocks.
-pub(crate) struct CompactDecryptor;
+pub(crate) struct CompactDecryptor<Output> {
+    _phantom: PhantomData<Output>,
+}
 
-impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D, Output>
-    for CompactDecryptor
-{
+impl<D: BatchDomain, O: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D> for CompactDecryptor<O> {
+    type Output = O;
     type Memo = ();
 
     fn batch_decrypt<IvkTag: Clone>(
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
-        outputs: &[(D, Output)],
+        outputs: &[(D, Self::Output)],
     ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_compact_note_decryption(ivks, outputs)
             .into_iter()
@@ -278,7 +283,7 @@ impl<Item: Task> Task for WithUsageTask<Item> {
 }
 
 /// A batch of outputs to trial decrypt.
-pub(crate) struct Batch<IvkTag, D: BatchDomain, Output, Dec: Decryptor<D, Output>> {
+pub(crate) struct Batch<IvkTag, D: BatchDomain, Dec: Decryptor<D>> {
     tags: Vec<IvkTag>,
     ivks: Vec<D::IncomingViewingKey>,
     /// We currently store outputs and repliers as parallel vectors, because
@@ -288,17 +293,17 @@ pub(crate) struct Batch<IvkTag, D: BatchDomain, Output, Dec: Decryptor<D, Output
     /// batch decryption. Ideally the domain, output, and output replier would
     /// all be part of the same struct, which would also track the output index
     /// (that is captured in the outer `OutputIndex` of each `OutputReplier`).
-    outputs: Vec<(D, Output)>,
+    outputs: Vec<(D, Dec::Output)>,
     repliers: Vec<OutputReplier<IvkTag, D, Dec::Memo>>,
 }
 
-impl<IvkTag, D, Output, Dec> DynamicUsage for Batch<IvkTag, D, Output, Dec>
+impl<IvkTag, D, Dec> DynamicUsage for Batch<IvkTag, D, Dec>
 where
     IvkTag: DynamicUsage,
     D: BatchDomain + DynamicUsage,
     D::IncomingViewingKey: DynamicUsage,
-    Output: DynamicUsage,
-    Dec: Decryptor<D, Output>,
+    Dec: Decryptor<D>,
+    Dec::Output: DynamicUsage,
 {
     fn dynamic_usage(&self) -> usize {
         self.tags.dynamic_usage()
@@ -324,11 +329,11 @@ where
     }
 }
 
-impl<IvkTag, D, Output, Dec> Batch<IvkTag, D, Output, Dec>
+impl<IvkTag, D, Dec> Batch<IvkTag, D, Dec>
 where
     IvkTag: Clone,
     D: BatchDomain,
-    Dec: Decryptor<D, Output>,
+    Dec: Decryptor<D>,
 {
     /// Constructs a new batch.
     fn new(tags: Vec<IvkTag>, ivks: Vec<D::IncomingViewingKey>) -> Self {
@@ -347,7 +352,7 @@ where
     }
 }
 
-impl<IvkTag, D, Output, Dec> Task for Batch<IvkTag, D, Output, Dec>
+impl<IvkTag, D, Dec> Task for Batch<IvkTag, D, Dec>
 where
     IvkTag: Clone + Send + 'static,
     D: BatchDomain + Send + 'static,
@@ -355,8 +360,8 @@ where
     D::Memo: Send,
     D::Note: Send,
     D::Recipient: Send,
-    Output: Send + 'static,
-    Dec: Decryptor<D, Output> + 'static,
+    Dec: Decryptor<D> + 'static,
+    Dec::Output: Send + 'static,
     Dec::Memo: Send,
 {
     /// Runs the batch of trial decryptions, and reports the results.
@@ -390,19 +395,19 @@ where
     }
 }
 
-impl<IvkTag, D, Output, Dec> Batch<IvkTag, D, Output, Dec>
+impl<IvkTag, D, Dec> Batch<IvkTag, D, Dec>
 where
     D: BatchDomain,
-    Output: Clone,
-    Dec: Decryptor<D, Output>,
+    Dec: Decryptor<D>,
+    Dec::Output: Clone,
 {
     /// Adds the given outputs to this batch.
     ///
     /// `replier` will be called with the result of every output.
     fn add_outputs(
         &mut self,
-        domain: impl Fn(&Output) -> D,
-        outputs: &[Output],
+        domain: impl Fn(&Dec::Output) -> D,
+        outputs: &[Dec::Output],
         replier: channel::Sender<OutputItem<IvkTag, D, Dec::Memo>>,
     ) {
         self.outputs.extend(
@@ -437,29 +442,29 @@ impl DynamicUsage for ResultKey {
 }
 
 /// Logic to run batches of trial decryptions on the global threadpool.
-pub(crate) struct BatchRunner<IvkTag, D, Output, Dec, T>
+pub(crate) struct BatchRunner<IvkTag, D, Dec, T>
 where
     D: BatchDomain,
-    Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<IvkTag, D, Output, Dec>>,
+    Dec: Decryptor<D>,
+    T: Tasks<Batch<IvkTag, D, Dec>>,
 {
     batch_size_threshold: usize,
     // The batch currently being accumulated.
-    acc: Batch<IvkTag, D, Output, Dec>,
+    acc: Batch<IvkTag, D, Dec>,
     // The running batches.
     running_tasks: T,
     // Receivers for the results of the running batches.
     pending_results: HashMap<ResultKey, BatchReceiver<IvkTag, D, Dec::Memo>>,
 }
 
-impl<IvkTag, D, Output, Dec, T> DynamicUsage for BatchRunner<IvkTag, D, Output, Dec, T>
+impl<IvkTag, D, Dec, T> DynamicUsage for BatchRunner<IvkTag, D, Dec, T>
 where
     IvkTag: DynamicUsage,
     D: BatchDomain + DynamicUsage,
     D::IncomingViewingKey: DynamicUsage,
-    Output: DynamicUsage,
-    Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<IvkTag, D, Output, Dec>> + DynamicUsage,
+    Dec: Decryptor<D>,
+    Dec::Output: DynamicUsage,
+    T: Tasks<Batch<IvkTag, D, Dec>> + DynamicUsage,
 {
     fn dynamic_usage(&self) -> usize {
         self.acc.dynamic_usage()
@@ -485,12 +490,12 @@ where
     }
 }
 
-impl<IvkTag, D, Output, Dec, T> BatchRunner<IvkTag, D, Output, Dec, T>
+impl<IvkTag, D, Dec, T> BatchRunner<IvkTag, D, Dec, T>
 where
     IvkTag: Clone,
     D: BatchDomain,
-    Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<IvkTag, D, Output, Dec>>,
+    Dec: Decryptor<D>,
+    T: Tasks<Batch<IvkTag, D, Dec>>,
 {
     /// Constructs a new batch runner for the given incoming viewing keys.
     pub(crate) fn new(
@@ -507,7 +512,7 @@ where
     }
 }
 
-impl<IvkTag, D, Output, Dec, T> BatchRunner<IvkTag, D, Output, Dec, T>
+impl<IvkTag, D, Dec, T> BatchRunner<IvkTag, D, Dec, T>
 where
     IvkTag: Clone + Send + 'static,
     D: BatchDomain + Send + 'static,
@@ -515,9 +520,9 @@ where
     D::Memo: Send,
     D::Note: Send,
     D::Recipient: Send,
-    Output: Clone + Send + 'static,
-    Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<IvkTag, D, Output, Dec>>,
+    Dec: Decryptor<D>,
+    Dec::Output: Clone + Send + 'static,
+    T: Tasks<Batch<IvkTag, D, Dec>>,
 {
     /// Batches the given outputs for trial decryption.
     ///
@@ -532,8 +537,8 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-        domain: impl Fn(&Output) -> D,
-        outputs: &[Output],
+        domain: impl Fn(&Dec::Output) -> D,
+        outputs: &[Dec::Output],
     ) {
         let (tx, rx) = channel::unbounded();
         self.acc.add_outputs(domain, outputs, tx);
