@@ -10,7 +10,7 @@ use std::sync::{
 
 use memuse::DynamicUsage;
 use zcash_note_encryption::{
-    batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE,
+    batch, BatchDomain, Domain, EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE,
     ENC_CIPHERTEXT_SIZE,
 };
 use zcash_primitives::{block::BlockHash, transaction::TxId};
@@ -55,9 +55,14 @@ pub(crate) trait Decryptor<D: BatchDomain> {
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Self::Output)],
     ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
+
+    fn ephemeral_key(out: &Self::Output) -> EphemeralKeyBytes;
+
+    fn cmstar(out: &Self::Output) -> &D::ExtractedCommitment;
 }
 
 /// A decryptor of outputs as encoded in transactions.
+#[derive(Clone, Copy)]
 #[allow(dead_code)]
 pub(crate) struct FullDecryptor<Output> {
     _phantom: PhantomData<Output>,
@@ -83,9 +88,18 @@ impl<D: BatchDomain, O: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D> for
                 })
             })
     }
+
+    fn ephemeral_key(out: &Self::Output) -> EphemeralKeyBytes {
+        out.ephemeral_key()
+    }
+
+    fn cmstar(out: &Self::Output) -> &D::ExtractedCommitment {
+        out.cmstar()
+    }
 }
 
 /// A decryptor of outputs as encoded in compact blocks.
+#[derive(Clone, Copy)]
 pub(crate) struct CompactDecryptor<Output> {
     _phantom: PhantomData<Output>,
 }
@@ -109,6 +123,14 @@ impl<D: BatchDomain, O: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D> for C
                     memo: (),
                 })
             })
+    }
+
+    fn ephemeral_key(out: &Self::Output) -> EphemeralKeyBytes {
+        out.ephemeral_key()
+    }
+
+    fn cmstar(out: &Self::Output) -> &D::ExtractedCommitment {
+        out.cmstar()
     }
 }
 

@@ -667,7 +667,7 @@ mod tests {
 
         let scanned_block = scan_block(
             &params,
-            block,
+            &block,
             &scanning_keys,
             &Nullifiers::empty(),
             Some(&BlockMetadata::from_parts(

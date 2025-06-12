@@ -2826,7 +2826,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/zcash/orchard?rev=4ce936527a970c26d9c4492e7924da1c5f36651b#4ce936527a970c26d9c4492e7924da1c5f36651b"
+source = "git+https://github.com/zcash/orchard?rev=c9552effe0de53cd29d9f52171e12537af60c55c#c9552effe0de53cd29d9f52171e12537af60c55c"
 dependencies = [
  "aes",
  "bitvec",
@@ -3875,7 +3875,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.5.0"
-source = "git+https://github.com/zcash/sapling-crypto?rev=b598a299e1f3489f5fd8892a8437e1ca5cdc6b4d#b598a299e1f3489f5fd8892a8437e1ca5cdc6b4d"
+source = "git+https://github.com/zcash/sapling-crypto?rev=8b3f65d382d7ec1decac022340d708b5865d2d8d#8b3f65d382d7ec1decac022340d708b5865d2d8d"
 dependencies = [
  "aes",
  "bellman",
@@ -6494,7 +6494,7 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.4.1"
-source = "git+https://github.com/zcash/zcash_note_encryption?rev=19003049cfd0f138bde086de09bd036c0ddc6322#19003049cfd0f138bde086de09bd036c0ddc6322"
+source = "git+https://github.com/zcash/zcash_note_encryption?rev=f32f8952808a9fd9b947a1bcf104d3f5d6f9c15c#f32f8952808a9fd9b947a1bcf104d3f5d6f9c15c"
 dependencies = [
  "chacha20",
  "chacha20poly1305",
