@@ -25,11 +25,11 @@ use zcash_protocol::{
 use zip32::Scope;
 
 use crate::proto::compact_formats::CompactTx;
-use crate::scan::Decryptor;
+use crate::scan::Decryptable;
 use crate::{
     data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
     proto::compact_formats::CompactBlock,
-    scan::{Batch, BatchRunner, CompactDecryptor, DecryptedOutput, Tasks},
+    scan::{Batch, BatchRunner, DecryptedOutput, Tasks},
     wallet::{WalletOutput, WalletSpend, WalletTx},
 };
 
@@ -507,61 +507,57 @@ where
     )
 }
 
-type TaggedSaplingBatch<IvkTag, D> = Batch<IvkTag, SaplingDomain, D>;
-type TaggedSaplingBatchRunner<IvkTag, Tasks, D> = BatchRunner<IvkTag, SaplingDomain, D, Tasks>;
+type TaggedSaplingBatch<IvkTag, O> = Batch<IvkTag, SaplingDomain, O>;
+type TaggedSaplingBatchRunner<IvkTag, O, Tasks> = BatchRunner<IvkTag, SaplingDomain, O, Tasks>;
 
 #[cfg(feature = "orchard")]
-type TaggedOrchardBatch<IvkTag, D> = Batch<IvkTag, OrchardDomain, D>;
+type TaggedOrchardBatch<IvkTag, O> = Batch<IvkTag, OrchardDomain, O>;
 #[cfg(feature = "orchard")]
-type TaggedOrchardBatchRunner<IvkTag, Tasks, D> = BatchRunner<IvkTag, OrchardDomain, D, Tasks>;
+type TaggedOrchardBatchRunner<IvkTag, O, Tasks> = BatchRunner<IvkTag, OrchardDomain, O, Tasks>;
 
-pub(crate) trait SaplingTasks<IvkTag, D: Decryptor<SaplingDomain>>:
-    Tasks<TaggedSaplingBatch<IvkTag, D>>
+pub(crate) trait SaplingTasks<IvkTag, O: Decryptable<SaplingDomain>>:
+    Tasks<TaggedSaplingBatch<IvkTag, O>>
 {
 }
 
-impl<IvkTag, D: Decryptor<SaplingDomain>, T: Tasks<TaggedSaplingBatch<IvkTag, D>>>
-    SaplingTasks<IvkTag, D> for T
+impl<IvkTag, O: Decryptable<SaplingDomain>, T: Tasks<TaggedSaplingBatch<IvkTag, O>>>
+    SaplingTasks<IvkTag, O> for T
 {
 }
 
 #[cfg(not(feature = "orchard"))]
-pub(crate) trait OrchardTasks<IvkTag> {}
+pub(crate) trait OrchardTasks<IvkTag, T> {}
 #[cfg(not(feature = "orchard"))]
-impl<IvkTag, T> OrchardTasks<IvkTag> for T {}
+impl<IvkTag, T> OrchardTasks<IvkTag, T> for T {}
 
 #[cfg(feature = "orchard")]
-pub(crate) trait OrchardTasks<IvkTag, D: Decryptor<OrchardDomain>>:
-    Tasks<TaggedOrchardBatch<IvkTag, D>>
+pub(crate) trait OrchardTasks<IvkTag, O: Decryptable<OrchardDomain>>:
+    Tasks<TaggedOrchardBatch<IvkTag, O>>
 {
 }
 #[cfg(feature = "orchard")]
-impl<IvkTag, D: Decryptor<OrchardDomain>, T: Tasks<TaggedOrchardBatch<IvkTag, D>>>
-    OrchardTasks<IvkTag, D> for T
+impl<IvkTag, O: Decryptable<OrchardDomain>, T: Tasks<TaggedOrchardBatch<IvkTag, O>>>
+    OrchardTasks<IvkTag, O> for T
 {
 }
 
 pub(crate) struct BatchRunners<
     IvkTag,
-    DS: Decryptor<SaplingDomain>,
-    TS: SaplingTasks<IvkTag, DS>,
-    DO: Decryptor<OrchardDomain>,
-    TO: OrchardTasks<IvkTag, DO>,
+    B: ScannableBlock,
+    TS: SaplingTasks<IvkTag, <B::Transaction as ScannableTransaction>::SaplingOutput>,
+    TO: OrchardTasks<IvkTag, <B::Transaction as ScannableTransaction>::OrchardAction>,
 > {
-    sapling: TaggedSaplingBatchRunner<IvkTag, TS, DS>,
+    sapling:
+        TaggedSaplingBatchRunner<IvkTag, <B::Transaction as ScannableTransaction>::SaplingOutput, TS>,
     #[cfg(feature = "orchard")]
-    orchard: TaggedOrchardBatchRunner<IvkTag, TO, DO>,
-    #[cfg(not(feature = "orchard"))]
-    orchard: PhantomData<TO>,
+    orchard:
+        TaggedOrchardBatchRunner<IvkTag, <B::Transaction as ScannableTransaction>::OrchardAction, TO>,
 }
 
-impl<IvkTag, DS, TS, DO, TO> BatchRunners<IvkTag, DS, TS, DO, TO>
+impl<IvkTag, B> BatchRunners<IvkTag, B>
 where
     IvkTag: Clone + Send + 'static,
-    DS: Decryptor<SaplingDomain, Output: Clone + Send + 'static> + 'static,
-    TS: SaplingTasks<IvkTag, DS>,
-    DO: Decryptor<OrchardDomain, Output: Clone + Send + 'static> + 'static,
-    TO: OrchardTasks<IvkTag, DO>,
+    B: ScannableBlock,
 {
     pub(crate) fn for_keys<AccountId>(
         batch_size_threshold: usize,
@@ -632,9 +628,10 @@ where
 
 pub(crate) trait ScannableTransaction {
     type SaplingSpend;
-    type SaplingOutput: Send + Clone + 'static;
+    type SaplingOutput: Decryptable<SaplingDomain> + Send + Clone + 'static;
 
-    type OrchardAction: Send + Clone + 'static;
+    #[cfg(feature = "orchard")]
+    type OrchardAction: Decryptable<OrchardDomain> + Send + Clone + 'static;
 
     fn txid(&self) -> TxId;
 
@@ -646,31 +643,20 @@ pub(crate) trait ScannableTransaction {
 
     fn sapling_domain(zip212_enforcement: Zip212Enforcement) -> SaplingDomain;
 
-    fn orchard_actions(&self) -> &[Self::OrchardAction];
-
-    fn orchard_domain(action: &Self::OrchardAction) -> OrchardDomain;
-
     fn sapling_nf(spend: &Self::SaplingSpend) -> sapling::Nullifier;
 
+    #[cfg(feature = "orchard")]
+    fn orchard_actions(&self) -> &[Self::OrchardAction];
+
+    #[cfg(feature = "orchard")]
+    fn orchard_domain(action: &Self::OrchardAction) -> OrchardDomain;
+
+    #[cfg(feature = "orchard")]
     fn orchard_nf(action: &Self::OrchardAction) -> orchard::note::Nullifier;
 }
 
 pub(crate) trait ScannableBlock {
     type Transaction: ScannableTransaction;
-    type SaplingDecryptor: Decryptor<
-            SaplingDomain,
-            Output = <Self::Transaction as ScannableTransaction>::SaplingOutput,
-            Memo: Send + 'static,
-        > + Send
-        + Clone
-        + 'static;
-    type OrchardDecryptor: Decryptor<
-            OrchardDomain,
-            Output = <Self::Transaction as ScannableTransaction>::OrchardAction,
-            Memo: Send + 'static,
-        > + Send
-        + Clone
-        + 'static;
 
     fn height(&self) -> BlockHeight;
 
@@ -757,6 +743,7 @@ impl<'a> ScannableTransaction for ScannableCompactTx<'a> {
 
     type SaplingOutput = sapling::note_encryption::CompactOutputDescription;
 
+    #[cfg(feature = "orchard")]
     type OrchardAction = orchard::note_encryption::CompactAction;
 
     fn txid(&self) -> TxId {
@@ -779,20 +766,23 @@ impl<'a> ScannableTransaction for ScannableCompactTx<'a> {
         SaplingDomain::new(zip212_enforcement)
     }
 
-    fn orchard_actions(&self) -> &[Self::OrchardAction] {
-        &self.orchard_actions
-    }
-
-    fn orchard_domain(action: &Self::OrchardAction) -> OrchardDomain {
-        OrchardDomain::for_compact_action(action)
-    }
-
     fn sapling_nf(spend: &Self::SaplingSpend) -> sapling::Nullifier {
         spend
             .nf()
             .expect("Could not deserialize nullifier for spend from protobuf representation.")
     }
 
+    #[cfg(feature = "orchard")]
+    fn orchard_actions(&self) -> &[Self::OrchardAction] {
+        &self.orchard_actions
+    }
+
+    #[cfg(feature = "orchard")]
+    fn orchard_domain(action: &Self::OrchardAction) -> OrchardDomain {
+        OrchardDomain::for_compact_action(action)
+    }
+
+    #[cfg(feature = "orchard")]
     fn orchard_nf(action: &Self::OrchardAction) -> orchard::note::Nullifier {
         action.nullifier()
     }
@@ -826,8 +816,6 @@ impl<'a> ScannableCompactBlock<'a> {
 
 impl<'a> ScannableBlock for ScannableCompactBlock<'a> {
     type Transaction = ScannableCompactTx<'a>;
-    type SaplingDecryptor = CompactDecryptor<sapling::note_encryption::CompactOutputDescription>;
-    type OrchardDecryptor = CompactDecryptor<orchard::note_encryption::CompactAction>;
 
     fn height(&self) -> BlockHeight {
         self.block.height()
@@ -1247,13 +1235,13 @@ fn find_spent<
 fn decrypt_inline<
     AccountId: Copy + Eq + Hash,
     D: BatchDomain,
-    Dec: Decryptor<D>,
+    Output: Decryptable<D>,
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
 >(
     keys: &HashMap<IvkTag, SK>,
-    decoded: &[(D, Dec::Output)],
+    decoded: &[(D, Output)],
 ) -> (Vec<Option<(IvkTag, D::Note)>>, usize) {
     let mut ivks = Vec::with_capacity(keys.len());
     let mut ivk_lookup = Vec::with_capacity(keys.len());
@@ -1264,7 +1252,7 @@ fn decrypt_inline<
 
     let mut decrypted_len = 0;
     (
-        Dec::batch_decrypt(&ivk_lookup, &ivks, &decoded)
+        Output::batch_decrypt(&ivk_lookup, &ivks, &decoded)
             .map(|v| {
                 v.map(|out| {
                     decrypted_len += 1;
@@ -1281,7 +1269,7 @@ fn decrypt_inline<
 fn find_received<
     AccountId: Copy + Eq + Hash,
     D: BatchDomain,
-    Dec: Decryptor<D>,
+    Output: Decryptable<D>,
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
@@ -1294,12 +1282,12 @@ fn find_received<
     commitment_tree_size: u32,
     keys: &HashMap<IvkTag, SK>,
     spent_from_accounts: &HashSet<AccountId>,
-    outputs: &[Dec::Output],
+    outputs: &[Output],
     batch_results: Option<
         impl FnOnce(TxId) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, Memo>>,
     >,
     inline_decrypt: impl FnOnce(&HashMap<IvkTag, SK>) -> (Vec<Option<(IvkTag, D::Note)>>, usize),
-    extract_note_commitment: impl Fn(&Dec::Output) -> NoteCommitment,
+    extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
 ) -> (
     Vec<WalletOutput<D::Note, Nf, AccountId>>,
     Vec<(NoteCommitment, Retention<BlockHeight>)>,
@@ -1361,7 +1349,7 @@ fn find_received<
 
             shielded_outputs.push(WalletOutput::from_parts(
                 output_idx,
-                Dec::ephemeral_key(output),
+                output.ephemeral_key(),
                 note,
                 is_change,
                 note_commitment_tree_position,

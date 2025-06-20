@@ -1,5 +1,9 @@
 use crossbeam_channel as channel;
+use orchard::note_encryption::OrchardDomain;
+use rayon::iter;
+use sapling::note_encryption::SaplingDomain;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
@@ -46,91 +50,165 @@ where
 }
 
 /// A decryptor of transaction outputs.
-pub(crate) trait Decryptor<D: BatchDomain> {
-    type Output;
+pub(crate) trait Decryptable<D: BatchDomain>: Sized {
     type Memo;
 
-    fn batch_decrypt<IvkTag: Clone>(
-        tags: &[IvkTag],
-        ivks: &[D::IncomingViewingKey],
-        outputs: &[(D, Self::Output)],
-    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
+    fn batch_decrypt<'a, IvkTag: Clone>(
+        tags: &'a [IvkTag],
+        ivks: &'a [D::IncomingViewingKey],
+        outputs: &'a [(D, Self)],
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> + 'a;
 
-    fn ephemeral_key(out: &Self::Output) -> EphemeralKeyBytes;
+    fn ephemeral_key(&self) -> EphemeralKeyBytes;
 
-    fn cmstar(out: &Self::Output) -> &D::ExtractedCommitment;
+    fn cmstar(&self) -> &D::ExtractedCommitment;
 }
 
-/// A decryptor of outputs as encoded in transactions.
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-pub(crate) struct FullDecryptor<Output> {
-    _phantom: PhantomData<Output>,
+impl<D: BatchDomain> Decryptable<D> for Infallible {
+    type Memo = Infallible;
+
+    fn batch_decrypt<'a, IvkTag: Clone>(
+        _tags: &'a [IvkTag],
+        _ivks: &'a [<D>::IncomingViewingKey],
+        _outputs: &'a [(D, Self)],
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> + 'a {
+        std::iter::empty()
+    }
+
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        unreachable!()
+    }
+
+    fn cmstar(&self) -> &<D>::ExtractedCommitment {
+        unreachable!()
+    }
 }
 
-impl<D: BatchDomain, O: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D> for FullDecryptor<O> {
-    type Output = O;
-    type Memo = D::Memo;
-
-    fn batch_decrypt<IvkTag: Clone>(
-        tags: &[IvkTag],
-        ivks: &[D::IncomingViewingKey],
-        outputs: &[(D, Self::Output)],
-    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
-        batch::try_note_decryption(ivks, outputs)
-            .into_iter()
-            .map(|res| {
-                res.map(|((note, recipient, memo), ivk_idx)| DecryptedOutput {
-                    ivk_tag: tags[ivk_idx].clone(),
-                    recipient,
-                    note,
-                    memo,
-                })
+fn batch_decrypt_full<
+    'a,
+    IvkTag: Clone,
+    D: BatchDomain,
+    O: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>,
+>(
+    tags: &'a [IvkTag],
+    ivks: &'a [D::IncomingViewingKey],
+    outputs: &'a [(D, O)],
+) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, D::Memo>>> + 'a {
+    batch::try_note_decryption(ivks, outputs)
+        .into_iter()
+        .map(|res| {
+            res.map(|((note, recipient, memo), ivk_idx)| DecryptedOutput {
+                ivk_tag: tags[ivk_idx].clone(),
+                recipient,
+                note,
+                memo,
             })
+        })
+}
+
+fn batch_decrypt_compact<
+    'a,
+    IvkTag: Clone,
+    D: BatchDomain,
+    O: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
+>(
+    tags: &'a [IvkTag],
+    ivks: &'a [D::IncomingViewingKey],
+    outputs: &'a [(D, O)],
+) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, ()>>> + 'a {
+    batch::try_compact_note_decryption(ivks, outputs)
+        .into_iter()
+        .map(|res| {
+            res.map(|((note, recipient), ivk_idx)| DecryptedOutput {
+                ivk_tag: tags[ivk_idx].clone(),
+                recipient,
+                note,
+                memo: (),
+            })
+        })
+}
+
+impl<A> Decryptable<SaplingDomain> for sapling::bundle::OutputDescription<A> {
+    type Memo = <SaplingDomain as Domain>::Memo;
+
+    fn batch_decrypt<'a, IvkTag: Clone>(
+        tags: &'a [IvkTag],
+        ivks: &'a [<SaplingDomain as Domain>::IncomingViewingKey],
+        outputs: &'a [(SaplingDomain, Self)],
+    ) -> impl Iterator<
+        Item = Option<DecryptedOutput<IvkTag, SaplingDomain, <SaplingDomain as Domain>::Memo>>,
+    > + 'a {
+        batch_decrypt_full(tags, ivks, outputs)
     }
 
-    fn ephemeral_key(out: &Self::Output) -> EphemeralKeyBytes {
-        out.ephemeral_key()
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        ShieldedOutput::ephemeral_key(&self)
     }
 
-    fn cmstar(out: &Self::Output) -> &D::ExtractedCommitment {
-        out.cmstar()
+    fn cmstar(&self) -> &<SaplingDomain as Domain>::ExtractedCommitment {
+        ShieldedOutput::cmstar(self)
     }
 }
 
-/// A decryptor of outputs as encoded in compact blocks.
-#[derive(Clone, Copy)]
-pub(crate) struct CompactDecryptor<Output> {
-    _phantom: PhantomData<Output>,
-}
-
-impl<D: BatchDomain, O: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D> for CompactDecryptor<O> {
-    type Output = O;
+impl Decryptable<SaplingDomain> for sapling::note_encryption::CompactOutputDescription {
     type Memo = ();
 
-    fn batch_decrypt<IvkTag: Clone>(
-        tags: &[IvkTag],
-        ivks: &[D::IncomingViewingKey],
-        outputs: &[(D, Self::Output)],
-    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
-        batch::try_compact_note_decryption(ivks, outputs)
-            .into_iter()
-            .map(|res| {
-                res.map(|((note, recipient), ivk_idx)| DecryptedOutput {
-                    ivk_tag: tags[ivk_idx].clone(),
-                    recipient,
-                    note,
-                    memo: (),
-                })
-            })
+    fn batch_decrypt<'a, IvkTag: Clone>(
+        tags: &'a [IvkTag],
+        ivks: &'a [<SaplingDomain as Domain>::IncomingViewingKey],
+        outputs: &'a [(SaplingDomain, Self)],
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, SaplingDomain, ()>>> + 'a {
+        batch_decrypt_compact(tags, ivks, outputs)
     }
 
-    fn ephemeral_key(out: &Self::Output) -> EphemeralKeyBytes {
-        out.ephemeral_key()
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        ShieldedOutput::ephemeral_key(&self)
     }
 
-    fn cmstar(out: &Self::Output) -> &D::ExtractedCommitment {
-        out.cmstar()
+    fn cmstar(&self) -> &<SaplingDomain as Domain>::ExtractedCommitment {
+        ShieldedOutput::cmstar(self)
+    }
+}
+
+impl<A> Decryptable<OrchardDomain> for orchard::Action<A> {
+    type Memo = <OrchardDomain as Domain>::Memo;
+
+    fn batch_decrypt<'a, IvkTag: Clone>(
+        tags: &'a [IvkTag],
+        ivks: &'a [<OrchardDomain as Domain>::IncomingViewingKey],
+        outputs: &'a [(OrchardDomain, Self)],
+    ) -> impl Iterator<
+        Item = Option<DecryptedOutput<IvkTag, OrchardDomain, <OrchardDomain as Domain>::Memo>>,
+    > + 'a {
+        batch_decrypt_full(tags, ivks, outputs)
+    }
+
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        ShieldedOutput::ephemeral_key(&self)
+    }
+
+    fn cmstar(&self) -> &<OrchardDomain as Domain>::ExtractedCommitment {
+        ShieldedOutput::cmstar(self)
+    }
+}
+
+impl Decryptable<OrchardDomain> for orchard::note_encryption::CompactAction {
+    type Memo = ();
+
+    fn batch_decrypt<'a, IvkTag: Clone>(
+        tags: &'a [IvkTag],
+        ivks: &'a [<OrchardDomain as Domain>::IncomingViewingKey],
+        outputs: &'a [(OrchardDomain, Self)],
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, OrchardDomain, ()>>> + 'a {
+        batch_decrypt_compact(tags, ivks, outputs)
+    }
+
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        ShieldedOutput::ephemeral_key(&self)
+    }
+
+    fn cmstar(&self) -> &<OrchardDomain as Domain>::ExtractedCommitment {
+        ShieldedOutput::cmstar(self)
     }
 }
 
@@ -305,7 +383,7 @@ impl<Item: Task> Task for WithUsageTask<Item> {
 }
 
 /// A batch of outputs to trial decrypt.
-pub(crate) struct Batch<IvkTag, D: BatchDomain, Dec: Decryptor<D>> {
+pub(crate) struct Batch<IvkTag, D: BatchDomain, Output: Decryptable<D>> {
     tags: Vec<IvkTag>,
     ivks: Vec<D::IncomingViewingKey>,
     /// We currently store outputs and repliers as parallel vectors, because
@@ -315,17 +393,16 @@ pub(crate) struct Batch<IvkTag, D: BatchDomain, Dec: Decryptor<D>> {
     /// batch decryption. Ideally the domain, output, and output replier would
     /// all be part of the same struct, which would also track the output index
     /// (that is captured in the outer `OutputIndex` of each `OutputReplier`).
-    outputs: Vec<(D, Dec::Output)>,
-    repliers: Vec<OutputReplier<IvkTag, D, Dec::Memo>>,
+    outputs: Vec<(D, Output)>,
+    repliers: Vec<OutputReplier<IvkTag, D, Output::Memo>>,
 }
 
-impl<IvkTag, D, Dec> DynamicUsage for Batch<IvkTag, D, Dec>
+impl<IvkTag, D, Output> DynamicUsage for Batch<IvkTag, D, Output>
 where
     IvkTag: DynamicUsage,
     D: BatchDomain + DynamicUsage,
     D::IncomingViewingKey: DynamicUsage,
-    Dec: Decryptor<D>,
-    Dec::Output: DynamicUsage,
+    Output: Decryptable<D> + DynamicUsage,
 {
     fn dynamic_usage(&self) -> usize {
         self.tags.dynamic_usage()
@@ -351,11 +428,11 @@ where
     }
 }
 
-impl<IvkTag, D, Dec> Batch<IvkTag, D, Dec>
+impl<IvkTag, D, Output> Batch<IvkTag, D, Output>
 where
     IvkTag: Clone,
     D: BatchDomain,
-    Dec: Decryptor<D>,
+    Output: Decryptable<D>,
 {
     /// Constructs a new batch.
     fn new(tags: Vec<IvkTag>, ivks: Vec<D::IncomingViewingKey>) -> Self {
@@ -374,7 +451,7 @@ where
     }
 }
 
-impl<IvkTag, D, Dec> Task for Batch<IvkTag, D, Dec>
+impl<IvkTag, D, Output> Task for Batch<IvkTag, D, Output>
 where
     IvkTag: Clone + Send + 'static,
     D: BatchDomain + Send + 'static,
@@ -382,9 +459,8 @@ where
     D::Memo: Send,
     D::Note: Send,
     D::Recipient: Send,
-    Dec: Decryptor<D> + 'static,
-    Dec::Output: Send + 'static,
-    Dec::Memo: Send,
+    D::Memo: Send,
+    Output: Decryptable<D> + Send + 'static,
 {
     /// Runs the batch of trial decryptions, and reports the results.
     fn run(self) {
@@ -398,7 +474,7 @@ where
 
         assert_eq!(outputs.len(), repliers.len());
 
-        let decryption_results = Dec::batch_decrypt(&tags, &ivks, &outputs);
+        let decryption_results = Output::batch_decrypt(&tags, &ivks, &outputs);
         for (decryption_result, OutputReplier(replier)) in decryption_results.zip(repliers) {
             // If `decryption_result` is `None` then we will just drop `replier`,
             // indicating to the parent `BatchRunner` that this output was not for us.
@@ -417,20 +493,19 @@ where
     }
 }
 
-impl<IvkTag, D, Dec> Batch<IvkTag, D, Dec>
+impl<IvkTag, D, Output> Batch<IvkTag, D, Output>
 where
     D: BatchDomain,
-    Dec: Decryptor<D>,
-    Dec::Output: Clone,
+    Output: Decryptable<D> + Clone,
 {
     /// Adds the given outputs to this batch.
     ///
     /// `replier` will be called with the result of every output.
     fn add_outputs(
         &mut self,
-        domain: impl Fn(&Dec::Output) -> D,
-        outputs: &[Dec::Output],
-        replier: channel::Sender<OutputItem<IvkTag, D, Dec::Memo>>,
+        domain: impl Fn(&Output) -> D,
+        outputs: &[Output],
+        replier: channel::Sender<OutputItem<IvkTag, D, D::Memo>>,
     ) {
         self.outputs.extend(
             outputs
@@ -464,29 +539,28 @@ impl DynamicUsage for ResultKey {
 }
 
 /// Logic to run batches of trial decryptions on the global threadpool.
-pub(crate) struct BatchRunner<IvkTag, D, Dec, T>
+pub(crate) struct BatchRunner<IvkTag, D, Output, T>
 where
     D: BatchDomain,
-    Dec: Decryptor<D>,
-    T: Tasks<Batch<IvkTag, D, Dec>>,
+    Output: Decryptable<D>,
+    T: Tasks<Batch<IvkTag, D, Output>>,
 {
     batch_size_threshold: usize,
     // The batch currently being accumulated.
-    acc: Batch<IvkTag, D, Dec>,
+    acc: Batch<IvkTag, D, Output>,
     // The running batches.
     running_tasks: T,
     // Receivers for the results of the running batches.
-    pending_results: HashMap<ResultKey, BatchReceiver<IvkTag, D, Dec::Memo>>,
+    pending_results: HashMap<ResultKey, BatchReceiver<IvkTag, D, D::Memo>>,
 }
 
-impl<IvkTag, D, Dec, T> DynamicUsage for BatchRunner<IvkTag, D, Dec, T>
+impl<IvkTag, D, Output, T> DynamicUsage for BatchRunner<IvkTag, D, Output, T>
 where
     IvkTag: DynamicUsage,
     D: BatchDomain + DynamicUsage,
     D::IncomingViewingKey: DynamicUsage,
-    Dec: Decryptor<D>,
-    Dec::Output: DynamicUsage,
-    T: Tasks<Batch<IvkTag, D, Dec>> + DynamicUsage,
+    Output: Decryptable<D> + DynamicUsage,
+    T: Tasks<Batch<IvkTag, D, Output>> + DynamicUsage,
 {
     fn dynamic_usage(&self) -> usize {
         self.acc.dynamic_usage()
@@ -512,12 +586,12 @@ where
     }
 }
 
-impl<IvkTag, D, Dec, T> BatchRunner<IvkTag, D, Dec, T>
+impl<IvkTag, D, Output, T> BatchRunner<IvkTag, D, Output, T>
 where
     IvkTag: Clone,
     D: BatchDomain,
-    Dec: Decryptor<D>,
-    T: Tasks<Batch<IvkTag, D, Dec>>,
+    Output: Decryptable<D>,
+    T: Tasks<Batch<IvkTag, D, Output>>,
 {
     /// Constructs a new batch runner for the given incoming viewing keys.
     pub(crate) fn new(
@@ -534,7 +608,7 @@ where
     }
 }
 
-impl<IvkTag, D, Dec, T> BatchRunner<IvkTag, D, Dec, T>
+impl<IvkTag, D, Output, T> BatchRunner<IvkTag, D, Output, T>
 where
     IvkTag: Clone + Send + 'static,
     D: BatchDomain + Send + 'static,
@@ -542,9 +616,8 @@ where
     D::Memo: Send,
     D::Note: Send,
     D::Recipient: Send,
-    Dec: Decryptor<D>,
-    Dec::Output: Clone + Send + 'static,
-    T: Tasks<Batch<IvkTag, D, Dec>>,
+    Output: Decryptable<D> + Clone + Send + 'static,
+    T: Tasks<Batch<IvkTag, D, Output>>,
 {
     /// Batches the given outputs for trial decryption.
     ///
@@ -559,8 +632,8 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-        domain: impl Fn(&Dec::Output) -> D,
-        outputs: &[Dec::Output],
+        domain: impl Fn(&Output) -> D,
+        outputs: &[Output],
     ) {
         let (tx, rx) = channel::unbounded();
         self.acc.add_outputs(domain, outputs, tx);
@@ -592,7 +665,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-    ) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, Dec::Memo>> {
+    ) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, D::Memo>> {
         self.pending_results
             .remove(&ResultKey(block_tag, txid))
             // We won't have a pending result if the transaction didn't have outputs of
