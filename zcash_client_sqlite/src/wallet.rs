@@ -1880,8 +1880,6 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let recover_until_height = recover_until_height(tx)?;
 
     let fully_scanned_height = block_fully_scanned(tx, params)?.map(|m| m.block_height());
-    // let trusted_summary_height =
-    //     (chain_tip_height + 1).saturating_sub(u32::from(confirmations_policy.trusted));
 
     let sapling_progress = progress.sapling_scan_progress(
         tx,
@@ -2053,13 +2051,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             // This is outlined in zip315.
             let untrusted_but_confirmed_spendable = received_height.iter().any(|mined_height| {
                 let number_of_confirmations = target_height - *mined_height;
-                u32::from(number_of_confirmations) >= required_confirmations
+                number_of_confirmations >= required_confirmations
             });
             let confirmed_spendable = note_is_trusted || untrusted_but_confirmed_spendable;
             let is_spendable =
                 any_spendable && confirmed_spendable && max_priority <= ScanPriority::Scanned;
 
-            let is_pending_change = is_change && confirmed_spendable;
+            let is_pending_change = is_change && !confirmed_spendable;
 
             let (spendable_value, change_pending_confirmation, value_pending_spendability) = {
                 let zero = Zatoshis::ZERO;
