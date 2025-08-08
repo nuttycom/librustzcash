@@ -386,7 +386,7 @@ where
         &st,
         &account,
         taddr,
-        ConfirmationsPolicy::new_symmetrical(2).unwrap(),
+        ConfirmationsPolicy::const_new_symmetrical(2),
         &not_confirmed_yet_value,
     );
 
@@ -405,7 +405,7 @@ where
         &st,
         &account,
         taddr,
-        ConfirmationsPolicy::new_symmetrical(2).unwrap(),
+        ConfirmationsPolicy::const_new_symmetrical(2),
         &zero_or_one_conf_value,
     );
 }

@@ -284,8 +284,8 @@ pub type ExtractErrT<DbT, N> = Error<
 /// transactions.
 #[derive(Clone, Copy, Debug)]
 pub struct ConfirmationsPolicy {
-    pub trusted: NonZeroU32,
-    pub untrusted: NonZeroU32,
+    trusted: NonZeroU32,
+    untrusted: NonZeroU32,
 }
 
 impl Default for ConfirmationsPolicy {
@@ -305,16 +305,78 @@ impl ConfirmationsPolicy {
         untrusted: NonZeroU32::MIN,
     };
 
-    /// Create a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields set to the
+    /// provided values.
+    ///
+    /// The number of confirmations required for trusted notes must be less than or equal to the
+    /// number of confirmations required for untrusted notes; this returns `Err(())` if this
+    /// invariant is violated.
+    pub fn new(trusted: NonZeroU32, untrusted: NonZeroU32) -> Result<Self, ()> {
+        if trusted > untrusted {
+            Err(())
+        } else {
+            Ok(Self { trusted, untrusted })
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// set to `min_confirmations`.
+    pub fn new_symmetrical(min_confirmations: NonZeroU32) -> Self {
+        Self {
+            trusted: min_confirmations,
+            untrusted: min_confirmations,
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields set to the
+    /// provided values, which must both be nonzero. The number of trusted confirmations required
+    /// must be less than or equal to the number of untrusted confirmations required.
+    ///
+    /// # Panics
+    /// Panics if `trusted > untrusted` or either argument value is zero.
+    #[cfg(feature = "test-dependencies")]
+    pub const fn const_new(trusted: u32, untrusted: u32) -> Self {
+        if trusted > untrusted {
+            panic!("trusted must be <= untrusted")
+        }
+
+        Self {
+            trusted: NonZeroU32::new(trusted).expect("trusted must be nonzero"),
+            untrusted: NonZeroU32::new(untrusted).expect("untrusted must be nonzero"),
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
     /// set to `min_confirmations`.
     ///
-    /// Returns `None` if `min_confirmations` is `0`.
-    pub fn new_symmetrical(min_confirmations: u32) -> Option<Self> {
-        let confirmations = NonZeroU32::new(min_confirmations)?;
-        Some(Self {
+    /// # Panics
+    /// Panics if `min_confirmations == 0`
+    #[cfg(feature = "test-dependencies")]
+    pub const fn const_new_symmetrical(min_confirmations: u32) -> Self {
+        let confirmations =
+            NonZeroU32::new(min_confirmations).expect("min_confirmations must be nonzero");
+        Self {
             trusted: confirmations,
             untrusted: confirmations,
-        })
+        }
+    }
+
+    /// Returns the number of confirmations required before trusted notes may be spent.
+    ///
+    /// See [`ZIP 315`] for details.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
+    pub fn trusted(&self) -> NonZeroU32 {
+        self.trusted
+    }
+
+    /// Returns the number of confirmations required before untrusted notes may be spent.
+    ///
+    /// See [`ZIP 315`] for details.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
+    pub fn untrusted(&self) -> NonZeroU32 {
+        self.untrusted
     }
 }
 

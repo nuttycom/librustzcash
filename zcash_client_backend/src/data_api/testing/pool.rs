@@ -2,7 +2,7 @@ use std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
-    num::{NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize},
+    num::{NonZeroU64, NonZeroU8, NonZeroUsize},
 };
 
 use assert_matches::assert_matches;
@@ -398,9 +398,9 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
     // Generate N confirmations by mining blocks
     let confirmations_policy = ConfirmationsPolicy::default();
     let min_confirmations = u32::from(if input_is_trusted {
-        confirmations_policy.trusted
+        confirmations_policy.trusted()
     } else {
-        confirmations_policy.untrusted
+        confirmations_policy.untrusted()
     });
     let steps = (1u32..min_confirmations)
         .map(|i| {
@@ -1181,15 +1181,12 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(
         st.get_pending_shielded_balance(
             account_id,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap()
+            ConfirmationsPolicy::const_new_symmetrical(10),
         ),
         value
     );
     assert_eq!(
-        st.get_spendable_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap()
-        ),
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::const_new_symmetrical(10),),
         Zatoshis::ZERO
     );
 
@@ -1213,14 +1210,11 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // Verified balance does not include the second note
     let total = (value + value).unwrap();
     assert_eq!(
-        st.get_spendable_balance(account_id, ConfirmationsPolicy::new_symmetrical(2).unwrap()),
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::const_new_symmetrical(2)),
         value
     );
     assert_eq!(
-        st.get_pending_shielded_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical(2).unwrap()
-        ),
+        st.get_pending_shielded_balance(account_id, ConfirmationsPolicy::const_new_symmetrical(2)),
         value
     );
     assert_eq!(st.get_total_balance(account_id), total);
@@ -1240,7 +1234,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            ConfirmationsPolicy::new_symmetrical(2).unwrap(),
+            ConfirmationsPolicy::const_new_symmetrical(2),
             &to,
             Zatoshis::const_from_u64(70000),
             None,
@@ -1270,7 +1264,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap(),
+            ConfirmationsPolicy::const_new_symmetrical(10),
             &to,
             Zatoshis::const_from_u64(70000),
             None,
@@ -1293,23 +1287,17 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(st.get_total_balance(account_id), (value * 11u64).unwrap());
     // Spendable balance at 10 confirmations is value * 2.
     assert_eq!(
-        st.get_spendable_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap()
-        ),
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::const_new_symmetrical(10)),
         (value * 2u64).unwrap()
     );
     assert_eq!(
-        st.get_pending_shielded_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap()
-        ),
+        st.get_pending_shielded_balance(account_id, ConfirmationsPolicy::const_new_symmetrical(10)),
         (value * 9u64).unwrap()
     );
 
     // Should now be able to generate a proposal
     let amount_sent = Zatoshis::from_u64(70000).unwrap();
-    let min_confirmations = ConfirmationsPolicy::new_symmetrical(10).unwrap();
+    let min_confirmations = ConfirmationsPolicy::const_new_symmetrical(10);
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1374,7 +1362,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // Send some of the funds to another address, but don't mine the tx.
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
-    let min_confirmations = ConfirmationsPolicy::new_symmetrical(1).unwrap();
+    let min_confirmations = ConfirmationsPolicy::const_new_symmetrical(1);
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1666,17 +1654,11 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // Value is considered pending at 10 confirmations.
     assert_eq!(
-        st.get_pending_shielded_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap()
-        ),
+        st.get_pending_shielded_balance(account_id, ConfirmationsPolicy::const_new_symmetrical(10)),
         value
     );
     assert_eq!(
-        st.get_spendable_balance(
-            account_id,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap()
-        ),
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::const_new_symmetrical(10)),
         Zatoshis::ZERO
     );
 
@@ -2230,11 +2212,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
         TargetHeight::from(account.birthday().height() + 5),
-        ConfirmationsPolicy {
-            // 5
-            untrusted: NonZeroU32::MIN.saturating_add(4),
-            ..Default::default()
-        },
+        ConfirmationsPolicy::const_new(1, 5),
         &[],
     )
     .unwrap();
@@ -2259,7 +2237,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
             account.usk(),
             req,
             OvkPolicy::Sender,
-            ConfirmationsPolicy::new_symmetrical(5).unwrap(),
+            ConfirmationsPolicy::const_new_symmetrical(5),
         ),
         Ok(_)
     );
