@@ -236,7 +236,7 @@ where
             "WITH eligible AS (
                  SELECT
                      {table_prefix}_received_notes.id AS id, txid, {output_index_col},
-                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position, 
+                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                      SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                      accounts.ufvk as ufvk, recipient_key_scope,
                      transactions.block AS mined_height
@@ -248,7 +248,7 @@ where
                  WHERE accounts.uuid = :account_uuid
                  AND {table_prefix}_received_notes.account_id = accounts.id
                  -- FIXME #1316, allow selection of dust inputs
-                 AND {table_prefix}_received_notes.value > 5000 
+                 AND {table_prefix}_received_notes.value > 5000
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
@@ -276,7 +276,7 @@ where
              )
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope, mined_height 
+                    ufvk, recipient_key_scope, mined_height
              FROM eligible WHERE so_far < :target_value
              UNION
              SELECT id, txid, {output_index_col},
