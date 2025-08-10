@@ -1983,7 +1983,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT
                 a.uuid, n.value, n.is_change, scan_state.max_priority,
-                t.block, t.recipeint_key_scope
+                t.block, n.recipient_key_scope
              FROM {table_prefix}_received_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN transactions t ON t.id_tx = n.tx
