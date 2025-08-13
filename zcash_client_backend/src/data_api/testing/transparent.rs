@@ -23,7 +23,7 @@ use ::transparent::{
 use sapling::zip32::ExtendedSpendingKey;
 use zcash_keys::{address::Address, keys::UnifiedAddressRequest};
 use zcash_primitives::block::BlockHash;
-use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
+use zcash_protocol::{consensus::TargetHeight, local_consensus::LocalNetwork, value::Zatoshis};
 
 use super::TestAccount;
 
@@ -52,19 +52,19 @@ fn check_balance<DSF>(
     assert_eq!(balance.unshielded_balance(), expected);
 
     // Check the older APIs for consistency.
-    let mempool_height = st.wallet().chain_height().unwrap().unwrap() + 1;
+    let target_height = TargetHeight::from(st.wallet().chain_height().unwrap().unwrap() + 1);
     assert_eq!(
         st.wallet()
-            .get_transparent_balances(account.id(), mempool_height)
+            .get_transparent_balances(account.id(), target_height, confirmations_policy)
             .unwrap()
             .get(taddr)
             .cloned()
-            .unwrap_or(Zatoshis::ZERO),
+            .map_or(Zatoshis::ZERO, |b| b.spendable_value()),
         expected.total(),
     );
     assert_eq!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, mempool_height.into(), confirmations_policy)
+            .get_spendable_transparent_outputs(taddr, target_height, confirmations_policy)
             .unwrap()
             .into_iter()
             .map(|utxo| utxo.value())
@@ -97,7 +97,11 @@ where
 
     let bal_absent = st
         .wallet()
-        .get_transparent_balances(account_id, height_1)
+        .get_transparent_balances(
+            account_id,
+            TargetHeight::from(height_1 + 1),
+            ConfirmationsPolicy::MIN,
+        )
         .unwrap();
     assert!(bal_absent.is_empty());
 
@@ -119,7 +123,7 @@ where
     assert_matches!(
         st.wallet().get_spendable_transparent_outputs(
             taddr,
-            height_1.into(),
+            TargetHeight::from(height_1 + 1),
             ConfirmationsPolicy::MIN
         ).as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
@@ -140,7 +144,11 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, height_1.into(), ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(
+                taddr,
+                TargetHeight::from(height_1 + 1),
+                ConfirmationsPolicy::MIN
+            )
             .as_deref(),
         Ok(&[])
     );
@@ -154,14 +162,18 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, height_2.into(), ConfirmationsPolicy::MIN)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
 
     assert_matches!(
-        st.wallet().get_transparent_balances(account_id, height_2),
-        Ok(h) if h.get(taddr) == Some(&value)
+        st.wallet().get_transparent_balances(
+            account_id,
+            TargetHeight::from(height_2 + 1),
+            ConfirmationsPolicy::MIN
+        ),
+        Ok(h) if h.get(taddr).map(|b| b.spendable_value()) == Some(value)
     );
 }
 
@@ -386,7 +398,7 @@ where
         &st,
         &account,
         taddr,
-        ConfirmationsPolicy::const_new_symmetrical(2),
+        ConfirmationsPolicy::const_new_symmetrical(2, false),
         &not_confirmed_yet_value,
     );
 
@@ -405,7 +417,7 @@ where
         &st,
         &account,
         taddr,
-        ConfirmationsPolicy::const_new_symmetrical(2),
+        ConfirmationsPolicy::const_new_symmetrical(2, true),
         &zero_or_one_conf_value,
     );
 }

@@ -40,6 +40,8 @@ workspace.
     as its argument instead of its parts. This minimizes the API complexity
     that would otherwise arise due to the presence of the `zcashd-compat`
     feature flag.
+  - Arguments to `WalletRead::get_transparent_balances` have changed. The balance
+    is now retrieved in terms of a target height and confirmations policy.
   - The semantics of `zcash_client_backend::data_api::Balance::total` and
     `zcash_client_backend::data_api::AccountBalance::total` have changed;
     these totals no longer include the value of uneconomic ("dust") notes
