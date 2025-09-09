@@ -987,7 +987,7 @@ pub struct TransactionsInvolvingAddress {
     /// returned.
     #[getset(get_copy = "pub")]
     block_range_start: BlockHeight,
-    /// Only transactions mined at heights less than this height should be returned.
+    /// If set, only transactions mined at heights less than this height should be returned.
     #[getset(get_copy = "pub")]
     block_range_end: Option<BlockHeight>,
     /// If a `request_at` time is set, the caller evaluating this request should attempt to
