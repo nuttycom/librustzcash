@@ -14,8 +14,9 @@
 //!
 //! * Viewing Keys: Wallets based upon this module are built around the capabilities of Zcash
 //!   [`UnifiedFullViewingKey`]s; the wallet backend provides no facilities for the storage
-//!   of spending keys, and spending keys must be provided by the caller in order to perform
-//!   transaction creation operations.
+//!   of spending keys, and spending keys must be provided by the caller (or delegated to external
+//!   devices via the provided [`pczt`] functionality) in order to perform transaction creation
+//!   operations.
 //! * Blockchain Scanning: A Zcash wallet must download and trial-decrypt each transaction on the
 //!   Zcash blockchain using one or more Viewing Keys in order to find new shielded transaction
 //!   outputs (generally termed "notes") belonging to the wallet. The primary entrypoint for this
@@ -26,7 +27,12 @@
 //!   used to process a range of blocks, the note commitment tree is updated with the note
 //!   commitments for the blocks in that range.
 //! * Transaction Construction: The [`wallet`] module provides functions for creating Zcash
-//!   transactions that spend funds belonging to the wallet.
+//!   transactions that spend funds belonging to the wallet. Input selection for transaction
+//!   construction is performed automatically. When spending funds received at transparent
+//!   addresses, the caller is required to explicitly specify the set of addresses from which to
+//!   spend funds, in order to prevent inadvertent commingling of funds received at different
+//!   addresses; allowing such commingling would enable chain observers to identify those
+//!   addresses as belonging to the same user.
 //!
 //! ## Core Traits
 //!
@@ -145,7 +151,7 @@ pub enum NullifierQuery {
 }
 
 /// An intent of representing spendable value to reach a certain targeted
-/// amount.  
+/// amount.
 ///
 /// `AtLeast(Zatoshis)` refers to the amount of `Zatoshis` that can cover
 /// at minimum the given zatoshis that is conformed by the sum of spendable notes.
@@ -2519,14 +2525,22 @@ impl AccountBirthday {
 /// Note that an error will be returned on an FVK collision even if the UFVKs do not
 /// match exactly, e.g. if they have different subsets of components.
 ///
+/// An account is treated as having a single root of spending authority that spans the shielded and
+/// transparent rules for the purpose of balance, transaction listing, and so forth. However,
+/// transparent keys imported via [`WalletWrite::import_standalone_transparent_pubkey`] break this
+/// abstraction slightly, so wallets using this API need to be cautious to enforce the invariant
+/// that the wallet either maintains access to the keys required to spend **ALL** outputs received
+/// by the account, or that it **DOES NOT** offer any spending capability for the account, i.e. the
+/// account is treated as view-only for all user-facing operations.
+///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
 ///
-/// Users of the `WalletWrite` trait should generally distinguish in their APIs and wallet
-/// UIs between creating a new account, and importing an account that previously existed.
-/// By convention, wallets should only allow a new account to be generated after confirmed
-/// funds have been received by the newest existing account; this allows automated account
-/// recovery to discover and recover all funds within a particular seed.
+/// Users of the `WalletWrite` trait should generally distinguish in their APIs and wallet UIs
+/// between creating a new account, and importing an account that previously existed. By
+/// convention, wallets should only allow a new account to be generated for a seed after confirmed
+/// funds have been received by the newest existing account for that seed; this allows automated
+/// account recovery to discover and recover all funds within a particular seed.
 ///
 /// # Creating a new wallet
 ///
@@ -2572,8 +2586,8 @@ pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
 
-    /// Tells the wallet to track the next available account-level spend authority, given the
-    /// current set of [ZIP 316] account identifiers known to the wallet database.
+    /// Tells the wallet to track the next available account-level spend authority for the provided
+    /// seed value, given the current set of [ZIP 316] account identifiers known to the wallet database.
     ///
     /// The "next available account" is defined as the ZIP-32 account index immediately following
     /// the highest existing account index among all accounts in the wallet that share the given
@@ -2698,9 +2712,12 @@ pub trait WalletWrite: WalletRead {
     ///
     /// The imported address will contribute to the balance of the account, but spending funds held
     /// by this address requires the associated spending keys to be provided explicitly when
-    /// calling [`create_proposed_transactions`].
+    /// calling [`create_proposed_transactions`]. By extension, calls to [`propose_shielding`]
+    /// must only include addresses for which the spending application holds or can obtain
+    /// the spending keys.
     ///
-    /// [`create_proposed_transactions`]: wallet::create_proposed_transactions
+    /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
+    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-inputs")]
     fn import_standalone_transparent_pubkey(
         &mut self,
