@@ -139,6 +139,12 @@ transparent-inputs = [
   "zcash_client_backend/transparent-inputs"
 ]
 
+# Enables operations that permit arbitrary transparent pubkeys to be associated
+# with an account in the wallet. Applications that rely on this feature mut
+# maintain spending keys corresponding to all imported pubkeys for any account
+# from which it permits spending.
+transparent-key-import = ["transparent-inputs"]
+
 ## Enables import from legacy zcashd wallet.dat wallets.
 zcashd-compat = [
   "zcash_keys/zcashd-compat",

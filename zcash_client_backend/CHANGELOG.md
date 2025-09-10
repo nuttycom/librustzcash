@@ -53,6 +53,13 @@ workspace.
   - `zcash_client_backend::wallet::Recipient`
 - `impl Clone` for:
   - `zcash_client_backend::wallet::{WalletTx, WalletSpend, WalletOutput}`
+- A new `transparent-key-import` feature flag has been added, and introduces
+  functionality that allows arbitrary transparent pubkeys to be imported to
+  the wallet and associated with an account. These features are introduced
+  primarily in the interest of providing compatibility with legacy `zcashd`
+  wallets; users of these APIs must ensure that when importing keys to a 
+  spending account that they control the spending key corresponding to each
+  imported pubkey.
 
 ### Changed
 - Migrated to `zcash_protocol 0.6.2`, `zcash_address 0.9`, `zip321 0.5`,
@@ -131,7 +138,7 @@ workspace.
   - `AddressInfo::from_parts` now takes an `AddressSource` value instead
     of a `DiversifierIndex`.
   - `WalletWrite` has added method `import_standalone_transparent_pubkey`
-    when the `transparent-inputs` feature flag is enabled.
+    when the `transparent-key-import` feature flag is enabled.
 - The following `zcash_client_backend::data_api::wallet` methods have changed;
   they now each take a `SpendingKeys` value instead of a `UnifiedSpendingKey`.
   This permits the spending of funds controlled by standalone keys not

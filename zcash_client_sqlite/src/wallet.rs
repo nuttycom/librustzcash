@@ -680,7 +680,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     Ok(account)
 }
 
-#[cfg(feature = "transparent-inputs")]
+#[cfg(feature = "transparent-key-import")]
 pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,

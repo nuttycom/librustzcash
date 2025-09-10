@@ -748,21 +748,24 @@ struct StepResult<AccountId> {
     utxos_spent: Vec<OutPoint>,
 }
 
-pub struct SpendingKeys<'a> {
-    usk: &'a UnifiedSpendingKey,
-    #[cfg(feature = "transparent-inputs")]
+pub struct SpendingKeys<'a, AccountId> {
+    account_id: AccountId,
+    usk: Option<&'a UnifiedSpendingKey>,
+    #[cfg(feature = "transparent-key-import")]
     standalone_transparent_keys: &'a HashMap<TransparentAddress, secp256k1::SecretKey>,
 }
 
-impl<'a> SpendingKeys<'a> {
+impl<'a, AccountId> SpendingKeys<'a, AccountId> {
     pub fn new(
-        usk: &'a UnifiedSpendingKey,
+        account_id: AccountId,
+        usk: Option<&'a UnifiedSpendingKey>,
         #[cfg(feature = "transparent-inputs")] standalone_transparent_keys: &'a HashMap<
             TransparentAddress,
             secp256k1::SecretKey,
         >,
     ) -> Self {
         Self {
+            account_id,
             usk,
             #[cfg(feature = "transparent-inputs")]
             standalone_transparent_keys,
@@ -788,7 +791,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     params: &ParamsT,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
-    spending_keys: &SpendingKeys,
+    spending_keys: &SpendingKeys<DbT::AccountId>,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
@@ -803,12 +806,6 @@ where
     #[cfg(feature = "transparent-inputs")]
     let mut unused_transparent_outputs = HashMap::new();
 
-    let account_id = wallet_db
-        .get_account_for_ufvk(&spending_keys.usk.to_unified_full_viewing_key())
-        .map_err(Error::DataSource)?
-        .ok_or(Error::KeyNotRecognized)?
-        .id();
-
     let mut step_results = Vec::with_capacity(proposal.steps().len());
     for step in proposal.steps() {
         let step_result: StepResult<_> = create_proposed_transaction(
@@ -817,7 +814,6 @@ where
             spend_prover,
             output_prover,
             spending_keys,
-            account_id,
             ovk_policy.clone(),
             proposal.fee_rule(),
             proposal.min_target_height(),
@@ -965,7 +961,7 @@ struct BuildState<'a, P, AccountId> {
 fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    ufvk: &UnifiedFullViewingKey,
+    ufvk: Option<&UnifiedFullViewingKey>,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     min_target_height: TargetHeight,
@@ -1125,8 +1121,8 @@ where
 
     for (_sapling_key_scope, sapling_note, merkle_path) in sapling_inputs.into_iter() {
         let key = match _sapling_key_scope {
-            Scope::External => ufvk.sapling().map(|k| k.fvk().clone()),
-            Scope::Internal => ufvk.sapling().map(|k| k.to_internal_fvk()),
+            Scope::External => ufvk.and_then(|k| k.sapling()).map(|k| k.fvk().clone()),
+            Scope::Internal => ufvk.and_then(|k| k.sapling()).map(|k| k.to_internal_fvk()),
         };
 
         builder.add_sapling_spend(
@@ -1139,7 +1135,7 @@ where
     #[cfg(feature = "orchard")]
     for (orchard_note, merkle_path) in orchard_inputs.into_iter() {
         builder.add_orchard_spend(
-            ufvk.orchard()
+            ufvk.and_then(|k| k.orchard())
                 .cloned()
                 .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?,
             *orchard_note,
@@ -1192,7 +1188,7 @@ where
                         scope,
                         address_index,
                     } => ufvk
-                        .transparent()
+                        .and_then(|k| k.transparent())
                         .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
                         .derive_address_pubkey(scope, address_index)
                         .expect("spending key derivation should not fail"),
@@ -1243,40 +1239,49 @@ where
     #[cfg(feature = "orchard")]
     let orchard_external_ovk = match &ovk_policy {
         OvkPolicy::Sender => ufvk
-            .orchard()
+            .and_then(|k| k.orchard())
             .map(|fvk| fvk.to_ovk(orchard::keys::Scope::External)),
         OvkPolicy::Custom { orchard, .. } => Some(orchard.clone()),
         OvkPolicy::Discard => None,
     };
 
+    // FIXME: Should we just use the ⊥ OVK for all wallet-internal outputs?
     #[cfg(feature = "orchard")]
     let orchard_internal_ovk = || {
         #[cfg(feature = "transparent-inputs")]
         if proposal_step.is_shielding() {
             return ufvk
-                .transparent()
+                .and_then(|k| k.transparent())
                 .map(|k| orchard::keys::OutgoingViewingKey::from(k.internal_ovk().as_bytes()));
         }
 
-        ufvk.orchard().map(|k| k.to_ovk(Scope::Internal))
+        ufvk.and_then(|k| k.orchard())
+            .map(|k| k.to_ovk(Scope::Internal))
     };
 
     // Apply the outgoing viewing key policy.
     let sapling_external_ovk = match &ovk_policy {
-        OvkPolicy::Sender => ufvk.sapling().map(|k| k.to_ovk(Scope::External)),
+        OvkPolicy::Sender => ufvk
+            .and_then(|k| k.sapling())
+            .map(|k| k.to_ovk(Scope::External)),
         OvkPolicy::Custom { sapling, .. } => Some(*sapling),
         OvkPolicy::Discard => None,
     };
 
+    // FIXME: Should we just use the ⊥ OVK for all wallet-internal outputs?
     let sapling_internal_ovk = || {
         #[cfg(feature = "transparent-inputs")]
         if proposal_step.is_shielding() {
+            // This should be fine even for shielding of funds held by standalone transparent
+            // pubkeys, because in order to execute the shielding operation in the first place it
+            // is necessary to have a UFVK.
             return ufvk
-                .transparent()
+                .and_then(|k| k.transparent())
                 .map(|k| sapling::keys::OutgoingViewingKey(k.internal_ovk().as_bytes()));
         }
 
-        ufvk.sapling().map(|k| k.to_ovk(Scope::Internal))
+        ufvk.and_then(|k| k.sapling())
+            .map(|k| k.to_ovk(Scope::Internal))
     };
 
     #[cfg(feature = "orchard")]
@@ -1426,7 +1431,7 @@ where
             PoolType::Shielded(ShieldedProtocol::Sapling) => {
                 builder.add_sapling_output(
                     sapling_internal_ovk(),
-                    ufvk.sapling()
+                    ufvk.and_then(|k| k.sapling())
                         .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?
                         .change_address()
                         .1,
@@ -1450,7 +1455,7 @@ where
                 {
                     builder.add_orchard_output(
                         orchard_internal_ovk(),
-                        ufvk.orchard()
+                        ufvk.and_then(|k| k.orchard())
                             .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
                             .address_at(0u32, orchard::keys::Scope::Internal),
                         change_value.value().into(),
@@ -1537,8 +1542,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     params: &ParamsT,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
-    spending_keys: &SpendingKeys,
-    account_id: <DbT as WalletRead>::AccountId,
+    spending_keys: &SpendingKeys<DbT::AccountId>,
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
     min_target_height: TargetHeight,
@@ -1560,8 +1564,8 @@ where
     let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
         wallet_db,
         params,
-        &spending_keys.usk.to_unified_full_viewing_key(),
-        account_id,
+        spending_keys.usk.map(|k| &k.to_unified_full_viewing_key()),
+        spending_keys.account_id,
         ovk_policy,
         min_target_height,
         prior_step_results,
@@ -1581,9 +1585,12 @@ where
                 address_index,
             } => spending_keys
                 .usk
-                .transparent()
-                .derive_secret_key(scope, address_index)
-                .expect("spending key derivation should not fail"),
+                .map(|k| {
+                    k.transparent()
+                        .derive_secret_key(scope, address_index)
+                        .expect("spending key derivation should not fail")
+                })
+                .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?,
             TransparentAddressMetadata::Standalone(_) => *spending_keys
                 .standalone_transparent_keys
                 .get(&address)
@@ -1636,37 +1643,41 @@ where
         },
     );
 
-    let sapling_dfvk = spending_keys
-        .usk
-        .sapling()
-        .to_diversifiable_full_viewing_key();
-    let sapling_internal_ivk =
-        PreparedIncomingViewingKey::new(&sapling_dfvk.to_ivk(Scope::Internal));
-    let sapling_outputs = build_state.sapling_output_meta.into_iter().enumerate().map(
-        |(i, (recipient, value, memo))| {
-            let output_index = build_result
-                .sapling_meta()
-                .output_index(i)
-                .expect("An output should exist in the transaction for each Sapling payment.");
+    let sapling_outputs = if !build_state.sapling_output_meta.is_empty() {
+        let sapling_dfvk = spending_keys
+            .usk
+            .map(|k| k.sapling().to_diversifiable_full_viewing_key())
+            .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?;
+        let sapling_internal_ivk =
+            PreparedIncomingViewingKey::new(&sapling_dfvk.to_ivk(Scope::Internal));
+        build_state.sapling_output_meta.into_iter().enumerate().map(
+            |(i, (recipient, value, memo))| {
+                let output_index = build_result
+                    .sapling_meta()
+                    .output_index(i)
+                    .expect("An output should exist in the transaction for each Sapling payment.");
 
-            let recipient = recipient.into_recipient_with_note(|| {
-                build_result
-                    .transaction()
-                    .sapling_bundle()
-                    .and_then(|bundle| {
-                        try_sapling_note_decryption(
-                            &sapling_internal_ivk,
-                            &bundle.shielded_outputs()[output_index],
-                            zip212_enforcement(params, min_target_height.into()),
-                        )
-                        .map(|(note, _, _)| Note::Sapling(note))
-                    })
-                    .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")
-            });
+                let recipient = recipient.into_recipient_with_note(|| {
+                    build_result
+                        .transaction()
+                        .sapling_bundle()
+                        .and_then(|bundle| {
+                            try_sapling_note_decryption(
+                                &sapling_internal_ivk,
+                                &bundle.shielded_outputs()[output_index],
+                                zip212_enforcement(params, min_target_height.into()),
+                            )
+                            .map(|(note, _, _)| Note::Sapling(note))
+                        })
+                        .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")
+                });
 
-            SentTransactionOutput::from_parts(output_index, recipient, value, memo)
-        },
-    );
+                SentTransactionOutput::from_parts(output_index, recipient, value, memo)
+            },
+        )
+    } else {
+        std::iter::empty()
+    };
 
     let txid: [u8; 32] = build_result.transaction().txid().into();
     assert_eq!(

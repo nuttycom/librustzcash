@@ -512,6 +512,20 @@ impl AccountSource {
 }
 
 /// A set of capabilities that a client account must provide.
+///
+/// An account represents a distinct set of viewing keys within the wallet; the keys for an account
+/// must not be shared with any other account in the wallet, and an application managing wallet
+/// accounts must ensure that it either maintains spending keys that can be used for spending _all_
+/// outputs detectable by the viewing keys of the account, or for none of them (i.e. the account is
+/// view-only.)
+///
+/// Balance information is available for any full-viewing-key based account; for an
+/// incoming-viewing-key only account balance cannot be determined because spends cannot be
+/// detected, and so balance-related APIs and APIs that rely upon spentness checks MUST be
+/// implemented to return errors if invoked for an IVK-only account.
+///
+/// For implementations that support the `transparent-inputs` feature, care must be taken to 
+/// ensure that 
 pub trait Account {
     type AccountId: Copy;
 
@@ -2710,15 +2724,15 @@ pub trait WalletWrite: WalletRead {
     /// Imports the given pubkey into the account without key derivation information, and adds the
     /// associated transparent p2pkh address.
     ///
-    /// The imported address will contribute to the balance of the account, but spending funds held
-    /// by this address requires the associated spending keys to be provided explicitly when
-    /// calling [`create_proposed_transactions`]. By extension, calls to [`propose_shielding`]
-    /// must only include addresses for which the spending application holds or can obtain
-    /// the spending keys.
+    /// The imported address will contribute to the balance of the account (for UFVK-based
+    /// accounts), but spending funds held by this address requires the associated spending keys to
+    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
+    /// to [`propose_shielding`] must only include addresses for which the spending application
+    /// holds or can obtain the spending keys.
     ///
     /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
     /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
         account: Self::AccountId,
