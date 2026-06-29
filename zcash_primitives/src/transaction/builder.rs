@@ -247,29 +247,35 @@ impl BuildConfig {
     /// Returns the Orchard builder for this configuration.
     fn orchard_builder(
         &self,
-        pool_restrictions: orchard::bundle::BundlePoolRestrictions,
+        bundle_version: orchard::bundle::BundleVersion,
     ) -> Option<orchard::builder::Builder> {
         match self {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor.as_ref().map(|a| {
                 orchard::builder::Builder::new(
-                    pool_restrictions,
                     orchard::builder::BundleType::DEFAULT,
+                    bundle_version,
+                    bundle_version.default_flags(),
                     *a,
                 )
+                .expect("the default flags are always representable for a transactional bundle")
             }),
             BuildConfig::Coinbase { .. }
-                if matches!(
-                    pool_restrictions,
-                    orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward
-                ) =>
+                if bundle_version == orchard::bundle::BundleVersion::orchard_v2() =>
             {
                 None
             }
-            BuildConfig::Coinbase { .. } => Some(orchard::builder::Builder::new(
-                pool_restrictions,
-                orchard::builder::BundleType::Coinbase,
-                orchard::Anchor::empty_tree(),
-            )),
+            BuildConfig::Coinbase { .. } => Some(
+                orchard::builder::Builder::new(
+                    orchard::builder::BundleType::Coinbase,
+                    bundle_version,
+                    // Coinbase transactions have `enableSpends = 0`. Every pool for which a
+                    // coinbase Orchard bundle is built (Orchard pre-NU6.3 and Ironwood) permits
+                    // cross-address transfers, so the spends-disabled flag set is representable.
+                    orchard::bundle::Flags::SPENDS_DISABLED,
+                    orchard::Anchor::empty_tree(),
+                )
+                .expect("spends-disabled flags are valid for a non-Orchard coinbase bundle"),
+            ),
         }
     }
 
@@ -282,7 +288,7 @@ impl BuildConfig {
 fn orchard_action_count(
     builder: &orchard::builder::Builder,
     is_coinbase: bool,
-    pool_restrictions: orchard::bundle::BundlePoolRestrictions,
+    bundle_version: orchard::bundle::BundleVersion,
 ) -> Result<usize, &'static str> {
     let num_spends = builder.spends().len();
     let num_outputs = builder
@@ -291,25 +297,34 @@ fn orchard_action_count(
         .checked_add(builder.changes().len())
         .ok_or("num_outputs + num_changes overflowed")?;
 
-    let bundle_type = if is_coinbase {
-        orchard::builder::BundleType::Coinbase
+    // The flags must match those the builder constructs for each configuration (see
+    // `orchard_builder`). For a `Coinbase` bundle `num_actions` ignores the flags, but supplying
+    // the matching set keeps the two paths consistent.
+    let (bundle_type, flags) = if is_coinbase {
+        (
+            orchard::builder::BundleType::Coinbase,
+            orchard::bundle::Flags::SPENDS_DISABLED,
+        )
     } else {
-        orchard::builder::BundleType::DEFAULT
+        (
+            orchard::builder::BundleType::DEFAULT,
+            bundle_version.default_flags(),
+        )
     };
 
-    bundle_type.num_actions(num_spends, num_outputs, pool_restrictions)
+    bundle_type.num_actions(flags, num_spends, num_outputs)
 }
 
-fn orchard_pool_restrictions_for_branch(
+fn orchard_bundle_version_for_branch(
     consensus_branch_id: BranchId,
-) -> orchard::bundle::BundlePoolRestrictions {
+) -> orchard::bundle::BundleVersion {
     match consensus_branch_id {
         #[cfg(zcash_unstable = "nu6.3")]
-        BranchId::Nu6_3 => orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+        BranchId::Nu6_3 => orchard::bundle::BundleVersion::orchard_v2(),
         #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
-        BranchId::Nu6_2 => orchard::bundle::BundlePoolRestrictions::OrchardNu6_2Only,
-        _ => orchard::bundle::BundlePoolRestrictions::OrchardPreNu6_2,
+        BranchId::Nu7 => orchard::bundle::BundleVersion::orchard_v2(),
+        BranchId::Nu6_2 => orchard::bundle::BundleVersion::orchard_v1(),
+        _ => orchard::bundle::BundleVersion::orchard_insecure_v0(),
     }
 }
 
@@ -379,7 +394,7 @@ pub struct Builder<P, U> {
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
-    orchard_pool_restrictions: Option<orchard::bundle::BundlePoolRestrictions>,
+    orchard_bundle_version: Option<orchard::bundle::BundleVersion>,
     _progress_notifier: U,
 }
 
@@ -486,14 +501,14 @@ impl<P: consensus::Parameters> Builder<P, ()> {
     /// expiry delta (20 blocks).
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
         let consensus_branch_id = BranchId::for_height(&params, target_height);
-        let pool_restrictions = orchard_pool_restrictions_for_branch(consensus_branch_id);
+        let bundle_version = orchard_bundle_version_for_branch(consensus_branch_id);
 
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
-            build_config.orchard_builder(pool_restrictions)
+            build_config.orchard_builder(bundle_version)
         } else {
             None
         };
-        let orchard_pool_restrictions = orchard_builder.as_ref().map(|_| pool_restrictions);
+        let orchard_bundle_version = orchard_builder.as_ref().map(|_| bundle_version);
 
         let sapling_builder = build_config
             .sapling_builder_config()
@@ -535,7 +550,7 @@ impl<P: consensus::Parameters> Builder<P, ()> {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
-            orchard_pool_restrictions,
+            orchard_bundle_version,
             _progress_notifier: (),
         }
     }
@@ -563,7 +578,7 @@ impl<P: consensus::Parameters> Builder<P, ()> {
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
-            orchard_pool_restrictions: self.orchard_pool_restrictions,
+            orchard_bundle_version: self.orchard_bundle_version,
             _progress_notifier,
         }
     }
@@ -758,7 +773,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
                         orchard_action_count(
                             builder,
                             self.build_config.is_coinbase(),
-                            self.orchard_pool_restrictions
+                            self.orchard_bundle_version
                                 .expect("orchard builder present implies pool restrictions"),
                         )
                     })
@@ -1269,8 +1284,8 @@ mod tests {
 
         assert_eq!(builder.tx_version, crate::transaction::TxVersion::V6);
         assert_eq!(
-            builder.orchard_pool_restrictions,
-            Some(orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward)
+            builder.orchard_bundle_version,
+            Some(orchard::bundle::BundleVersion::orchard_v2())
         );
     }
 
@@ -1291,8 +1306,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            builder.orchard_pool_restrictions,
-            Some(orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward)
+            builder.orchard_bundle_version,
+            Some(orchard::bundle::BundleVersion::orchard_v2())
         );
     }
 
@@ -1331,10 +1346,12 @@ mod tests {
         );
         let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
         let mut builder = orchard::builder::Builder::new(
-            orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
             orchard::builder::BundleType::DEFAULT,
+            orchard::bundle::BundleVersion::orchard_v2(),
+            orchard::bundle::BundleVersion::orchard_v2().default_flags(),
             orchard::Anchor::empty_tree(),
-        );
+        )
+        .unwrap();
 
         builder
             .add_change_output(
@@ -1350,7 +1367,7 @@ mod tests {
             super::orchard_action_count(
                 &builder,
                 false,
-                orchard::bundle::BundlePoolRestrictions::OrchardNu6_3Onward,
+                orchard::bundle::BundleVersion::orchard_v2(),
             )
             .unwrap(),
             2
@@ -1387,7 +1404,7 @@ mod tests {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
             orchard_builder: None,
-            orchard_pool_restrictions: None,
+            orchard_bundle_version: None,
             _progress_notifier: (),
         };
 
