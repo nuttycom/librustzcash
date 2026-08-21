@@ -38,8 +38,9 @@ workspace.
   `zcash_client_backend::scanning::full::scan_block` were previously discarded
   when the scanned blocks were persisted.
 - Block scanning records transparent outputs paying the wallet and spends of the
-  wallet's transparent outputs. A spend observed before the block that created
-  the spent output has been scanned is resolved when that output is discovered.
+  wallet's transparent outputs, for both compact and full blocks. A spend
+  observed before the block that created the spent output has been scanned is
+  resolved when that output is discovered.
 
 ## [0.22.0] - 2026-08-18
 
