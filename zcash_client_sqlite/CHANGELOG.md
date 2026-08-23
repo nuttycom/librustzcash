@@ -32,6 +32,8 @@ workspace.
   a pre-Sapling zcashd wallet — left the wallet without a chain tip, so every
   transaction was silently deferred to the post-import rescan and counted
   under `transactions_without_wallet_relevance`.
+- `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
+  no longer fail on wallets containing accounts imported by UIVK.
 
 ## [0.22.0] - 2026-08-18
 
