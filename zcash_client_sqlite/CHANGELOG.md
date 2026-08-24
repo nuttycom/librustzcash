@@ -42,6 +42,8 @@ workspace.
   transparent spend detection. Transparent outputs detected by
   `zcash_client_backend::scanning::full::scan_block` were previously discarded
   when the scanned blocks were persisted.
+- `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
+  no longer fail on wallets containing accounts imported by UIVK.
 
 ## [0.22.0] - 2026-08-18
 
