@@ -22,6 +22,11 @@ workspace.
   previously conflated with `transactions_without_wallet_relevance`.
 
 ### Fixed
+- `WalletWrite::import_account_ufvk` accepts a transparent-only unified full
+  viewing key; it previously failed with
+  `AddressGenerationError::NoSatisfiableReceiver`. The resulting account's
+  default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
+  Address.
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
   no longer fails with a "Consensus branch ID not known" error. When neither a
