@@ -27,6 +27,14 @@ workspace.
   `AddressGenerationError::NoSatisfiableReceiver`. The resulting account's
   default address is a transparent-only ZIP 316 Revision 2 (`tu`) Unified
   Address.
+- Upgrading a wallet database whose `support_zcashd_wallet_import` migration
+  ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
+  accounts_new.zcashd_legacy_address_index`. In such a database every account
+  that existed at that time has a NULL `accounts.zcashd_legacy_address_index`;
+  the migration that rebuilds the `accounts` table now maps those to the
+  sentinel value that column has carried since, and gives the database the
+  `hd_account` uniqueness index over `(hd_seed_fingerprint, hd_account_index,
+  zcashd_legacy_address_index)`.
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
   no longer fails with a "Consensus branch ID not known" error. When neither a
