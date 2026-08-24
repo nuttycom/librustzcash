@@ -15,6 +15,13 @@ workspace.
 - `zcash_client_sqlite::WalletDb::anchor_retention`: the anchor-retention policy
   the wallet's `put_blocks` applies, for a store that maintains the wallet's
   note commitment trees by other means.
+- Schema: a migration adds the `transparent_tx_address_observations` table,
+  which records every transparent address named by a wallet-involved
+  transaction, in both involvement directions, and populates it from every
+  transaction for which complete data is already stored.
+- `WalletDb` implements the storage-trait method newly added to
+  `zcash_client_backend` behind `transparent-inputs`,
+  `ll::LowLevelWalletWrite::put_transparent_address_observations`.
 
 ### Changed
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns

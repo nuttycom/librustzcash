@@ -40,6 +40,12 @@ workspace.
   stabilized_note_rewind_un_mines_shard_completion,
   stabilized_note_settled_height_invalidated_by_reorg,
   stabilized_note_spendable_across_small_tip_advance}`
+- `zcash_client_backend::wallet::TransparentAddressObservation` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::TransparentInvolvement` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::transparent_address_observations` (behind
+  `transparent-inputs`)
 
 ### Changed
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
@@ -109,6 +115,11 @@ workspace.
   holds keys for only some protocols. They return
   `Error::KeyNotAvailable` if the proposal spends from, or sends change to, a
   pool for which the spending key holds no key.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`,
+  `put_transparent_address_observations`. Implement it by recording each
+  supplied observation as an idempotent upsert keyed by the transaction, the
+  involvement direction, and the item index.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
