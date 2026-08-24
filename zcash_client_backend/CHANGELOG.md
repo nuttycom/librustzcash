@@ -46,6 +46,8 @@ workspace.
   `transparent-inputs`)
 - `zcash_client_backend::wallet::transparent_address_observations` (behind
   `transparent-inputs`)
+- `zcash_client_backend::wallet::WalletTx::transparent_address_observations`
+  (behind `transparent-inputs`)
 
 ### Changed
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
@@ -120,6 +122,9 @@ workspace.
   `put_transparent_address_observations`. Implement it by recording each
   supplied observation as an idempotent upsert keyed by the transaction, the
   involvement direction, and the item index.
+- `zcash_client_backend::wallet::WalletTx::new` takes, behind
+  `transparent-inputs`, a `transparent_address_observations` argument after
+  `transparent_outputs`.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
