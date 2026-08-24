@@ -159,6 +159,7 @@ migration_modules!(
     support_zcashd_wallet_import,
     transparent_gap_limit_handling,
     transparent_spend_locator_map,
+    transparent_tx_address_observations,
     tree_retained_checkpoints,
     tx_observation_height,
     tx_retrieval_queue,
@@ -403,6 +404,9 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_txid_blob::Migration),
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
+        Box::new(transparent_tx_address_observations::Migration {
+            _params: params.clone(),
+        }),
     ]
 }
 
