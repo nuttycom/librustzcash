@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
+  `util::testing::FixedClock`) are now re-exports of the same-named types in
+  `zcash_client_backend::util`.
+
 ### Added
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
@@ -32,6 +37,11 @@ workspace.
   a pre-Sapling zcashd wallet — left the wallet without a chain tip, so every
   transaction was silently deferred to the post-import rescan and counted
   under `transactions_without_wallet_relevance`.
+- `WalletDb::put_blocks` records the transparent outputs of each scanned
+  transaction that pay a wallet account, and queues each such outpoint for
+  transparent spend detection. Transparent outputs detected by
+  `zcash_client_backend::scanning::full::scan_block` were previously discarded
+  when the scanned blocks were persisted.
 
 ## [0.22.0] - 2026-08-18
 

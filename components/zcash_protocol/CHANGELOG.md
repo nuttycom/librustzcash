@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::address` module.
+- `zcash_protocol::address::Revision`
+- `zcash_protocol::consensus::NetworkConstants`:
+  - `fn hrp_unified_address_r2`
+  - `fn hrp_unified_address_r2_ti`
+  - `fn hrp_unified_fvk_r2`
+  - `fn hrp_unified_ivk_r2`
+- HRP constants for ZIP 316 Revision 2 unified encodings added to
+  `zcash_protocol::constants::{mainnet, testnet, regtest}`. HRPs
+  for transparent-including UAs have the `TI` suffix.
+
 ## [0.10.5] - 2026-08-18
 
 ### Added

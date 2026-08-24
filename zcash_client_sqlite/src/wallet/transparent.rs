@@ -378,7 +378,7 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     uivk_str: &str,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    let (network, uivk) = Uivk::decode(uivk_str)
+    let (network, _revision, uivk) = Uivk::decode(uivk_str)
         .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
 
     if params.network_type() != network {
@@ -2934,6 +2934,20 @@ mod tests {
     #[test]
     fn put_received_transparent_utxo() {
         zcash_client_backend::data_api::testing::transparent::put_received_transparent_utxo(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn scan_full_block_persists_transparent_outputs() {
+        zcash_client_backend::data_api::testing::transparent::scan_full_block_persists_transparent_outputs(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn put_blocks_rolls_back_transparent_outputs() {
+        zcash_client_backend::data_api::testing::transparent::put_blocks_rolls_back_transparent_outputs(
             TestDbFactory::default(),
         );
     }

@@ -10,6 +10,40 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::util` module, providing the `Clock` capability trait,
+  `SystemClock`, and (behind the `test-dependencies` feature)
+  `testing::FixedClock`. These were previously defined in
+  `zcash_client_sqlite::util`, which now re-exports them.
+- `zcash_client_backend::data_api::error::AddressExpiryError`
+- `zcash_client_backend::data_api::error::Error::RecipientAddressExpiry`
+- `zcash_client_backend::data_api::testing::TestState::clock`
+
+### Changed
+- `zcash_client_backend::data_api::wallet`: `create_proposed_transactions`,
+  `create_pczt_from_proposal`, `extract_and_store_transaction_from_pczt`, and
+  `shield_transparent_funds` now take a `clock: &impl Clock` argument, used for
+  transaction-creation timestamps and to enforce recipient address expiry.
+- `zcash_client_backend::data_api::wallet::{create_proposed_transactions,
+  create_pczt_from_proposal}` now enforce the ZIP 316 Revision 2 address
+  expiration rules for every payment recipient: a payment to an address that is
+  known to have expired, or whose expiry height the transaction's expiry height
+  would exceed, fails with `Error::RecipientAddressExpiry`.
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` is now documented as
+  atomic: an implementation must apply the whole batch of blocks or none of it,
+  and a caller may assume after an error that nothing was persisted. An
+  implementation that applies blocks one at a time must be updated.
+
+### Fixed
+- `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
+  transparent outputs of each scanned transaction that pay a wallet account, and
+  queues each such outpoint for transparent spend detection. Transparent outputs
+  detected by `zcash_client_backend::scanning::full::scan_block` were previously
+  discarded when the scanned blocks were persisted, and were recovered only when
+  complete transaction data reached
+  `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`.
+  Transparent spends are still not detected during block scanning.
+
 ## [0.24.0] - 2026-08-18
 
 ### Added
