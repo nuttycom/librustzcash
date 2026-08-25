@@ -128,6 +128,7 @@ migration_modules!(
     fix_bad_change_flagging,
     fix_bad_ironwood_change_flagging,
     fix_broken_commitment_trees,
+    fix_transparent_funding_attribution,
     fix_transparent_received_outputs,
     fix_v_transactions_expired_unmined,
     full_account_ids,
@@ -405,6 +406,9 @@ pub(super) fn all_migrations<
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
         Box::new(transparent_tx_address_observations::Migration {
+            _params: params.clone(),
+        }),
+        Box::new(fix_transparent_funding_attribution::Migration {
             _params: params.clone(),
         }),
     ]
