@@ -56,6 +56,11 @@ workspace.
   recovered output completes. A transaction that only spends from the wallet is
   recognized through the address its `scriptSig` reveals. The migration that
   adds the index applies this to a wallet's entire stored history.
+- Recognizing involvement mined below an account's birthday lowers that
+  birthday to the height of the earliest such involvement, clears the account's
+  recorded birthday note commitment tree sizes, and queues the widened range
+  (from Sapling activation upward) for scanning at `ScanPriority::Historic`,
+  re-queueing any part of it that had already been scanned.
 
 ## [0.22.0] - 2026-08-18
 

@@ -24,6 +24,7 @@ use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
         TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
+        scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     fees::StandardFeeRule,
@@ -50,7 +51,7 @@ use zcash_primitives::transaction::fees::{
 };
 use zcash_protocol::{
     TxId,
-    consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
+    consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS, NetworkUpgrade},
     value::{ZatBalance, Zatoshis},
 };
 use zcash_script::script;
@@ -80,6 +81,7 @@ use crate::{
             is_locked_at, output_eligible_condition, overridable_owners_rarray, push_lock_params,
         },
         mempool_height,
+        scanning::replace_queue_entries,
     },
 };
 #[cfg(feature = "transparent-inputs")]
@@ -2812,6 +2814,78 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
     Ok(None)
 }
 
+/// Lowers the birthday of the given account to `height`, and queues the range this widens for
+/// scanning. Does nothing if the account's birthday is already at or below `height`.
+///
+/// Involvement mined below an account's birthday means the birthday is wrong: the account was
+/// active earlier than the wallet was told, and every height floor derived from the birthday —
+/// including the range over which the wallet requests transparent address history — sits too
+/// high. Lowering the birthday moves all of them at once, so the birthday is set to `height`
+/// itself.
+///
+/// The range queued for scanning is clamped to Sapling activation, because activity earlier than
+/// the recorded birthday implies the account may have history in every pool over the widened
+/// range, but no shielded pool exists below activation for it to have history in. Every other
+/// writer to the scan queue anchors there for the same reason. Within that range the work is
+/// queued at [`ScanPriority::Historic`], and a range already recorded as scanned is queued again,
+/// because it was scanned without this account among the keys in use.
+///
+/// The note commitment tree sizes stored alongside the birthday are the sizes as of the birthday
+/// height, and cannot be determined offline for a height the wallet has not scanned, so they are
+/// cleared. They inform the reporting of scan progress, which falls back to estimating from
+/// scanned block data when they are absent, and it is that data the queued rescan restores.
+pub(crate) fn lower_account_birthday<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    account_uuid: AccountUuid,
+    height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let current = conn
+        .query_row(
+            "SELECT birthday_height FROM accounts WHERE uuid = :uuid",
+            named_params! { ":uuid": account_uuid.expose_uuid() },
+            |row| row.get::<_, u32>(0).map(BlockHeight::from),
+        )
+        .optional()?;
+
+    let Some(current) = current.filter(|current| height < *current) else {
+        return Ok(());
+    };
+
+    conn.execute(
+        "UPDATE accounts
+         SET birthday_height = :height,
+             birthday_sapling_tree_size = NULL,
+             birthday_orchard_tree_size = NULL
+         WHERE uuid = :uuid AND birthday_height > :height",
+        named_params! {
+            ":height": u32::from(height),
+            ":uuid": account_uuid.expose_uuid(),
+        },
+    )?;
+
+    // In regtest the Sapling activation height may be unset; the genesis block is then the floor.
+    let activation = params
+        .activation_height(NetworkUpgrade::Sapling)
+        .unwrap_or_else(|| BlockHeight::from(0));
+    let queue_from = std::cmp::max(height, activation);
+
+    if queue_from < current {
+        let widened = queue_from..current;
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &widened,
+            std::iter::once(ScanRange::from_parts(
+                widened.clone(),
+                ScanPriority::Historic,
+            )),
+            true,
+        )?;
+    }
+
+    Ok(())
+}
+
 /// Whether recording a transparent output should also extend the gap of preallocated addresses
 /// for each key scope the containing transaction involves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3003,6 +3077,14 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     if let Some(spending_transaction_id) = spending_tx_ref {
         mark_transparent_utxo_spent(conn, spending_transaction_id, output.outpoint())?;
+    }
+
+    // The wallet was paid at this address when the transaction was mined, so it was active then.
+    // This covers recognition from either direction: a transaction stored or scanned against an
+    // address the wallet already held, and an address added afterwards that reconciliation
+    // matched against a transaction already stored.
+    if let Some(height) = output_height.map(BlockHeight::from) {
+        lower_account_birthday(conn, params, account_uuid, height)?;
     }
 
     #[cfg(feature = "transparent-inputs")]
