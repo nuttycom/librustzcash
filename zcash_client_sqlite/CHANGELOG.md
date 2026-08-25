@@ -16,6 +16,10 @@ workspace.
   `zcash_client_backend::util`.
 
 ### Added
+- Schema: a migration adds the `transparent_tx_address_observations` table,
+  which records every transparent address named by a wallet-involved
+  transaction, in both involvement directions, and populates it from every
+  transaction for which complete data is already stored.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
@@ -57,6 +61,26 @@ workspace.
   when the scanned blocks were persisted.
 - `wallet::init::init_wallet_db` and `wallet::init::WalletMigrator::init_or_migrate`
   no longer fail on wallets containing accounts imported by UIVK.
+- Block scanning records transparent outputs paying the wallet and spends of the
+  wallet's transparent outputs, for both compact and full blocks. A spend
+  observed before the block that created the spent output has been scanned is
+  resolved when that output is discovered.
+- A transaction the wallet stores that names a transparent address the wallet
+  did not control at the time is recognized when an address covering it is
+  added afterwards, by account creation or import, by
+  `WalletWrite::import_standalone_transparent_{address, pubkey, pubkeys,
+  script}`, or by gap-limit advancement. Recognition records the received
+  output and any spend of it, marks the address used and advances the gap,
+  watches the output for a spend, requests the transactions that funded the
+  containing transaction, and sets the fee of any transaction whose fee the
+  recovered output completes. A transaction that only spends from the wallet is
+  recognized through the address its `scriptSig` reveals. The migration that
+  adds the index applies this to a wallet's entire stored history.
+- Recognizing involvement mined below an account's birthday lowers that
+  birthday to the height of the earliest such involvement, clears the account's
+  recorded birthday note commitment tree sizes, and queues the widened range
+  (from Sapling activation upward) for scanning at `ScanPriority::Historic`,
+  re-queueing any part of it that had already been scanned.
 
 ## [0.22.0] - 2026-08-18
 

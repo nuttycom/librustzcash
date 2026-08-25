@@ -158,6 +158,8 @@ migration_modules!(
     support_legacy_sqlite,
     support_zcashd_wallet_import,
     transparent_gap_limit_handling,
+    transparent_spend_locator_map,
+    transparent_tx_address_observations,
     tree_retained_checkpoints,
     tx_observation_height,
     tx_retrieval_queue,
@@ -388,6 +390,7 @@ pub(super) fn all_migrations<
         Box::new(v_address_uses_ironwood::Migration),
         Box::new(v_transactions_pool_crossing::Migration),
         Box::new(zip318_classification::Migration),
+        Box::new(transparent_spend_locator_map::Migration),
         Box::new(v_transactions_zip318_kind::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
@@ -401,6 +404,9 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_txid_blob::Migration),
         Box::new(v_migration_transactions::Migration),
         Box::new(standalone_address::Migration),
+        Box::new(transparent_tx_address_observations::Migration {
+            _params: params.clone(),
+        }),
     ]
 }
 

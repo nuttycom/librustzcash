@@ -293,21 +293,24 @@ pub struct PutBlocksRows {
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
 ///
-/// # Nullifier tracking
+/// # Spend tracking
 ///
 /// When a batch extends the wallet's contiguous fully-scanned frontier (i.e.
 /// [`LowLevelWalletRead::block_fully_scanned_height`] equals the `from_state` height, so
 /// every block from the wallet birthday through the previous block has been scanned),
-/// nullifier-map insertion is skipped for blocks more than
+/// spend-map insertion is skipped for blocks more than
 /// [`NULLIFIER_MAP_RETENTION_BLOCKS`] below the end of the batch. Under that precondition
-/// the skipped entries are provably unobservable: the nullifier map exists to detect
-/// spends observed before the corresponding note's block has been scanned, which cannot
-/// occur below a contiguous frontier — any wallet note spendable in a skipped block was
+/// the skipped entries are provably unobservable: the spend maps exist to detect
+/// spends observed before the corresponding output's block has been scanned, which cannot
+/// occur below a contiguous frontier — any wallet output spendable in a skipped block was
 /// either received in an already-scanned block (so its spend is detected directly against
-/// the wallet's own nullifiers rather than the map) or is received later in this same
-/// ascending batch (so the spend is linked when the receiving transaction is processed).
-/// For every out-of-order range — scanning after a gap, recent-first, or chain-tip
-/// pre-scans — the nullifiers of every block are tracked.
+/// the wallet's own nullifiers and outpoints rather than the map) or is received later in
+/// this same ascending batch (so the spend is linked when the receiving transaction is
+/// processed). For every out-of-order range — scanning after a gap, recent-first, or
+/// chain-tip pre-scans — every block's spends are tracked.
+///
+/// This governs the shielded nullifier maps and the transparent spend map alike; the
+/// argument above is indifferent to which kind of output identifier is being tracked.
 pub fn put_blocks_rows<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
@@ -406,15 +409,23 @@ where
                 .queue_tx_retrieval(std::iter::once(tx.txid()), None)
                 .map_err(PutBlocksError::Storage)?;
 
-            // Mark notes as spent and remove them from the scanning cache. Block scanning does
-            // not yet detect transparent spends, so no prevouts are available here.
-            // TODO: Pass the scanned transparent spends once the scanner reports them.
-            // https://github.com/zcash/librustzcash/issues/2395
+            // The scan has determined that this transaction involves the wallet, so record the
+            // transparent addresses its data names. Which involvement directions the scan could
+            // observe depends on whether the block was compact or full; the record is an
+            // idempotent upsert, so a later observation at higher fidelity completes it.
+            #[cfg(feature = "transparent-inputs")]
+            wallet_db
+                .put_transparent_address_observations(tx_ref, tx.transparent_address_observations())
+                .map_err(PutBlocksError::Storage)?;
+
+            // Mark notes and transparent outputs as spent, and remove them from the scanning
+            // cache. Only spends of outputs the wallet already knew of appear here; those it
+            // could not yet recognize are handled by the spend map below.
             let _ = mark_notes_spent(
                 wallet_db,
                 tx_ref,
                 #[cfg(feature = "transparent-inputs")]
-                None.iter(),
+                tx.transparent_spends().iter().map(|spend| spend.outpoint()),
                 tx.sapling_spends().iter().map(|spend| spend.nf()),
                 #[cfg(feature = "orchard")]
                 tx.orchard_spends().iter().map(|spend| spend.nf()),
@@ -544,6 +555,11 @@ where
             wallet_db
                 .track_block_ironwood_nullifiers(block.height(), block.ironwood().nullifier_map())
                 .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "transparent-inputs")]
+            wallet_db
+                .track_block_transparent_spends(block.height(), block.transparent_spend_map())
+                .map_err(PutBlocksError::Storage)?;
         }
 
         note_positions.extend(block.transactions().iter().flat_map(|wtx| {
@@ -615,7 +631,7 @@ where
 
     // Prune the nullifier map of entries we no longer need.
     wallet_db
-        .prune_tracked_nullifiers(PRUNING_DEPTH)
+        .prune_tracked_spends(PRUNING_DEPTH)
         .map_err(PutBlocksError::Storage)?;
 
     Ok(PutBlocksRows {
@@ -959,6 +975,14 @@ where
     if let Some(height) = d_tx.mined_height() {
         wallet_db.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
+
+    // Complete transaction data is in hand, so both involvement directions can be recorded: the
+    // addresses paid by the outputs, and the addresses revealed by the inputs' `scriptSig`s.
+    #[cfg(feature = "transparent-inputs")]
+    wallet_db.put_transparent_address_observations(
+        tx_ref,
+        &crate::wallet::transparent_address_observations(d_tx.tx()),
+    )?;
 
     // Record how the transaction classifies against ZIP 318, so that a wallet can label a
     // migration transaction in its history without a migration plan, which does not survive a
@@ -1658,10 +1682,10 @@ pub fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPT
 /// The number of trailing blocks in a batch whose nullifier-map entries are always
 /// retained, even when [`put_blocks_rows`] can prove that insertion is skippable. This
 /// keeps the map's contents aligned with a
-/// [`LowLevelWalletWrite::prune_tracked_nullifiers`] pruning depth of the same value, and
+/// [`LowLevelWalletWrite::prune_tracked_spends`] pruning depth of the same value, and
 /// comfortably exceeds the maximum reorg depth the wallet tolerates.
 ///
-/// [`LowLevelWalletWrite::prune_tracked_nullifiers`]: super::LowLevelWalletWrite::prune_tracked_nullifiers
+/// [`LowLevelWalletWrite::prune_tracked_spends`]: super::LowLevelWalletWrite::prune_tracked_spends
 pub const NULLIFIER_MAP_RETENTION_BLOCKS: u32 = 100;
 
 /// Derives the nullifier-tracking floor for one [`put_blocks_rows`] batch (see the

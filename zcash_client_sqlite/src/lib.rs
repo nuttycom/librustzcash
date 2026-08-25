@@ -130,9 +130,9 @@ use {
             ll::wallet::generate_transparent_gap_addresses,
         },
         fees::StandardFeeRule,
-        wallet::TransparentAddressMetadata,
+        wallet::{TransparentAddressMetadata, TransparentAddressObservation},
     },
-    zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
+    zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits, ReconcileOutcome},
 };
 
 // `AddressCodec` is used only by `find_account_for_ephemeral_address`, which is
@@ -1357,6 +1357,26 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     }
 
     #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_outpoints(
+        &self,
+    ) -> Result<HashMap<OutPoint, Self::AccountId>, Self::Error> {
+        wallet::transparent::get_unspent_outpoints(self.conn.borrow())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_transparent_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<(Self::AccountId, Option<TransparentKeyScope>)>, Self::Error> {
+        wallet::transparent::find_account_uuid_for_transparent_address(
+            self.conn.borrow(),
+            &self.params,
+            address,
+        )
+        .map(|opt| opt.map(|(a, s)| (a, s.as_transparent())))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
         account: Self::AccountId,
@@ -2152,8 +2172,14 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         account: <Self as WalletRead>::AccountId,
         address: TransparentAddress,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_address(self.conn.0, &self.params, account, address)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_address(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            address,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2162,8 +2188,14 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkey(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            pubkey,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2172,8 +2204,14 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
-            .map(|_inserted| ())
+        wallet::import_standalone_transparent_pubkeys(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            pubkeys,
+        )
+        .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -2182,7 +2220,13 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         account: <Self as WalletRead>::AccountId,
         script: zcash_script::script::Redeem,
     ) -> Result<(), <Self as WalletRead>::Error> {
-        wallet::import_standalone_transparent_script(self.conn.0, &self.params, account, script)
+        wallet::import_standalone_transparent_script(
+            self.conn.0,
+            &self.params,
+            &self.gap_limits,
+            account,
+            script,
+        )
     }
 
     fn get_next_available_address(
@@ -2933,9 +2977,18 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )
     }
 
-    fn prune_tracked_nullifiers(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
+    #[cfg(feature = "transparent-inputs")]
+    fn track_block_transparent_spends(
+        &mut self,
+        block_height: BlockHeight,
+        spends: &[(TxIndex, TxId, Vec<OutPoint>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_transparent_spend_locator_map(self.conn.borrow(), block_height, spends)
+    }
+
+    fn prune_tracked_spends(&mut self, pruning_depth: u32) -> Result<(), Self::Error> {
         if let Some(meta) = wallet::block_fully_scanned(self.conn.borrow(), &self.params)? {
-            wallet::prune_nullifier_map(
+            wallet::prune_spend_maps(
                 self.conn.borrow(),
                 meta.block_height().saturating_sub(pruning_depth),
             )?;
@@ -2987,9 +3040,24 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             output,
             observation_height,
             known_unspent,
+            wallet::transparent::GapAdvance::Immediate,
         )?;
 
         Ok((account_uuid, key_scope.as_transparent()))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn put_transparent_address_observations(
+        &mut self,
+        tx_ref: Self::TxRef,
+        observations: &[TransparentAddressObservation],
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::observations::put_observations(
+            self.conn.borrow(),
+            &self.params,
+            tx_ref,
+            observations,
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -3471,6 +3539,28 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             account_id,
             key_scope,
             list,
+        )
+    }
+
+    fn reconcile_stored_addresses(
+        &mut self,
+        _account_id: Self::AccountRef,
+        _key_scope: TransparentKeyScope,
+        added: &[(Address, TransparentAddress, NonHardenedChildIndex)],
+    ) -> Result<ReconcileOutcome, Self::Error> {
+        // The shared reconciliation helper is address-keyed, and derives each address's account
+        // and key scope from its `addresses` row rather than taking them as arguments: its other
+        // callers — standalone receiver import, and the whole-book pass that account creation
+        // and the index migration run — have no single `(account, key scope)` to supply. The
+        // uniqueness index on `cached_transparent_receiver_address` makes that derivation a
+        // function, so the trait's arguments carry no information the row does not.
+        let addresses = added.iter().map(|(_, taddr, _)| *taddr).collect::<Vec<_>>();
+
+        wallet::transparent::observations::reconcile_observations(
+            self.conn.borrow(),
+            &self.params,
+            &self.gap_limits,
+            wallet::transparent::observations::ReconcileScope::Addresses(&addresses),
         )
     }
 }

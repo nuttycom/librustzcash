@@ -162,7 +162,10 @@ use {
     ReceiverRequirement::*,
     rusqlite::types::Value,
     std::rc::Rc,
-    zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
+    zcash_client_backend::{
+        data_api::DecryptedTransaction,
+        wallet::{WalletTransparentOutput, transparent_address_observations},
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -708,6 +711,19 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         )?;
     }
 
+    // Check every address the wallet now holds against transparent involvement it observed
+    // before this account existed. The gap generation above reconciles the windows it derives,
+    // but the addresses pre-generated below the default address index are outside any such
+    // window, and an account added to a wallet with existing history is exactly the case in
+    // which those addresses may already have been paid.
+    #[cfg(feature = "transparent-inputs")]
+    transparent::reconcile_and_extend_gaps(
+        conn,
+        params,
+        gap_limits,
+        transparent::observations::ReconcileScope::AllAddresses,
+    )?;
+
     Ok(account)
 }
 
@@ -861,6 +877,7 @@ fn standalone_address_only_row(
 pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     address: ::transparent::address::TransparentAddress,
 ) -> Result<usize, SqliteClientError> {
@@ -928,9 +945,28 @@ pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
         ],
     )?;
 
+    reconcile_imported_receivers(conn, params, gap_limits, &[address])?;
+
     // The account is known (resolved above) and the receiver is not already recorded (checked
     // above), so exactly one row is inserted.
     Ok(rows_affected)
+}
+
+/// Checks receivers that have just been imported against transparent involvement the wallet
+/// already observed, so that a transaction naming one of them is recognized on import.
+#[cfg(feature = "transparent-key-import")]
+fn reconcile_imported_receivers<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    gap_limits: &GapLimits,
+    addresses: &[::transparent::address::TransparentAddress],
+) -> Result<(), SqliteClientError> {
+    transparent::reconcile_and_extend_gaps(
+        conn,
+        params,
+        gap_limits,
+        transparent::observations::ReconcileScope::Addresses(addresses),
+    )
 }
 
 /// Imports a standalone transparent P2PKH receiver by its pubkey into the given account.
@@ -941,13 +977,22 @@ pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
 pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     pubkey: secp256k1::PublicKey,
 ) -> Result<usize, SqliteClientError> {
     // Resolve the account up front so an unknown account is reported explicitly, rather than
     // inferred from a zero-row INSERT.
     let account_id = get_account_ref(conn, account_uuid)?;
-    import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)
+    let inserted =
+        import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)?;
+    reconcile_imported_receivers(
+        conn,
+        params,
+        gap_limits,
+        &[TransparentAddress::from_pubkey(&pubkey)],
+    )?;
+    Ok(inserted)
 }
 
 /// Imports a batch of standalone transparent P2PKH receivers by their pubkeys into the given
@@ -957,6 +1002,7 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
 pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     pubkeys: &[secp256k1::PublicKey],
 ) -> Result<usize, SqliteClientError> {
@@ -971,6 +1017,15 @@ pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
             *pubkey,
         )?;
     }
+
+    // Reconciled once for the whole batch: the check is keyed by address, so a batch costs one
+    // pass over the receivers rather than one pass per receiver.
+    let addresses = pubkeys
+        .iter()
+        .map(TransparentAddress::from_pubkey)
+        .collect::<Vec<_>>();
+    reconcile_imported_receivers(conn, params, gap_limits, &addresses)?;
+
     Ok(inserted)
 }
 
@@ -1067,6 +1122,7 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
 pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    gap_limits: &GapLimits,
     account_uuid: AccountUuid,
     redeem_script: zcash_script::script::Redeem,
 ) -> Result<(), SqliteClientError> {
@@ -1141,6 +1197,7 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
                 ":id": row_id,
             ],
         )?;
+        reconcile_imported_receivers(conn, params, gap_limits, &[addr])?;
         return Ok(());
     }
 
@@ -1163,6 +1220,8 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
             ":imported_transparent_receiver_script": &rs_bytes[..]
         ],
     )?;
+
+    reconcile_imported_receivers(conn, params, gap_limits, &[addr])?;
 
     Ok(())
 }
@@ -3693,6 +3752,19 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         sent_tx.target_height().into(),
     )?;
 
+    // The wallet created this transaction, so it involves the wallet and its complete data is in
+    // hand: both involvement directions are recorded, as for any other transaction the wallet
+    // stores. An output paying an address of this wallet that no account has derived yet — the
+    // middle hop of a ZIP 320 pair, or an address beyond another account's gap — is recognized
+    // when that address is derived.
+    #[cfg(feature = "transparent-inputs")]
+    transparent::observations::put_observations(
+        conn,
+        params,
+        tx_ref,
+        &transparent_address_observations(sent_tx.tx()),
+    )?;
+
     let mut detectable_via_scanning = false;
 
     // Mark notes as spent.
@@ -3788,6 +3860,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             ),
                             sent_tx.target_height().into(),
                             true,
+                            transparent::GapAdvance::Immediate,
                         )?;
                     }
                 }
@@ -3884,6 +3957,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     .expect("can extract a recipient address from an ephemeral address script"),
                     sent_tx.target_height().into(),
                     true,
+                    transparent::GapAdvance::Immediate,
                 )?;
             }
             #[cfg(feature = "transparent-inputs")]
@@ -3910,6 +3984,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     .expect("can extract a recipient address from a transparent recipient_address"),
                     sent_tx.target_height().into(),
                     true,
+                    transparent::GapAdvance::Immediate,
                 )?;
             }
         }
@@ -5704,16 +5779,17 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     Ok(())
 }
 
-/// Inserts the given entries into the nullifier map.
+/// Records the transaction locator `(block_height, tx_index)` for `txid`, so that a spend map
+/// keyed by locator can reference the transaction without a `transactions` row.
 ///
-/// Returns an error if the new entries conflict with existing ones. This indicates either
-/// corrupted data, or that a reorg has occurred and the caller needs to repair the wallet
-/// state with [`truncate_to_height`].
-pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
+/// Returns an error if the locator conflicts with one already recorded. This indicates either
+/// corrupted data, or that a reorg has occurred and the caller needs to repair the wallet state
+/// with [`truncate_to_height`].
+fn ensure_tx_locator(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
-    spend_pool: ShieldedPool,
-    new_entries: &[(TxIndex, TxId, Vec<N>)],
+    tx_index: TxIndex,
+    txid: TxId,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_select_tx_locators = conn.prepare_cached(
         "SELECT block_height, tx_index, txid
@@ -5725,6 +5801,71 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
         (block_height, tx_index, txid)
         VALUES (:block_height, :tx_index, :txid)",
     )?;
+
+    let tx_args = named_params![
+        ":block_height": u32::from(block_height),
+        ":tx_index": u16::from(tx_index),
+        ":txid": txid.as_ref(),
+    ];
+
+    // We cannot use an upsert here, because the spend maps use the tx locator as their
+    // foreign key instead of `txid` for database size efficiency. If an insert into
+    // `tx_locator_map` were to conflict, we would need the resulting update to cascade into
+    // those maps as either:
+    // - an update (if a transaction moved within a block), or
+    // - a deletion (if the locator now points to a different transaction).
+    //
+    // `ON UPDATE` has `CASCADE` to always update, but has no deletion option. So we
+    // instead set `ON UPDATE RESTRICT` on the foreign key relation, and require the
+    // caller to manually rewind the database in this situation.
+    let locator = stmt_select_tx_locators
+        .query_map(tx_args, |row| {
+            Ok((
+                BlockHeight::from_u32(row.get(0)?),
+                TxIndex::from(row.get::<_, u16>(1)?),
+                TxId::from_bytes(row.get(2)?),
+            ))
+        })?
+        .try_fold(None, |acc, row| -> Result<_, SqliteClientError> {
+            match (acc, row?) {
+                (None, rhs) => Ok(Some(Some(rhs))),
+                // If there was more than one row, then due to the uniqueness
+                // constraints on the `tx_locator_map` table, all of the rows conflict
+                // with the locator being inserted.
+                (Some(_), _) => Ok(Some(None)),
+            }
+        })?;
+
+    match locator {
+        // If the locator in the table matches the one being inserted, do nothing.
+        Some(Some(loc)) if loc == (block_height, tx_index, txid) => Ok(()),
+        // If the locator being inserted would conflict, report it.
+        Some(_) => Err(SqliteClientError::DbError(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some(
+                "UNIQUE constraint failed: tx_locator_map.block_height, tx_locator_map.tx_index"
+                    .into(),
+            ),
+        ))),
+        // If the locator doesn't exist, insert it.
+        None => stmt_insert_tx_locator
+            .execute(tx_args)
+            .map(|_| ())
+            .map_err(SqliteClientError::from),
+    }
+}
+
+/// Inserts the given entries into the nullifier map.
+///
+/// Returns an error if the new entries conflict with existing ones. This indicates either
+/// corrupted data, or that a reorg has occurred and the caller needs to repair the wallet
+/// state with [`truncate_to_height`].
+pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
+    conn: &rusqlite::Transaction<'_>,
+    block_height: BlockHeight,
+    spend_pool: ShieldedPool,
+    new_entries: &[(TxIndex, TxId, Vec<N>)],
+) -> Result<(), SqliteClientError> {
     let mut stmt_insert_nullifier_mapping = conn.prepare_cached(
         "INSERT INTO nullifier_map
         (spend_pool, nf, block_height, tx_index)
@@ -5735,51 +5876,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
     )?;
 
     for (tx_index, txid, nullifiers) in new_entries {
-        let tx_args = named_params![
-            ":block_height": u32::from(block_height),
-            ":tx_index": u16::from(*tx_index),
-            ":txid": txid.as_ref(),
-        ];
-
-        // We cannot use an upsert here, because we use the tx locator as the foreign key
-        // in `nullifier_map` instead of `txid` for database size efficiency. If an insert
-        // into `tx_locator_map` were to conflict, we would need the resulting update to
-        // cascade into `nullifier_map` as either:
-        // - an update (if a transaction moved within a block), or
-        // - a deletion (if the locator now points to a different transaction).
-        //
-        // `ON UPDATE` has `CASCADE` to always update, but has no deletion option. So we
-        // instead set `ON UPDATE RESTRICT` on the foreign key relation, and require the
-        // caller to manually rewind the database in this situation.
-        let locator = stmt_select_tx_locators
-            .query_map(tx_args, |row| {
-                Ok((
-                    BlockHeight::from_u32(row.get(0)?),
-                    TxIndex::from(row.get::<_, u16>(1)?),
-                    TxId::from_bytes(row.get(2)?),
-                ))
-            })?
-            .try_fold(None, |acc, row| -> Result<_, SqliteClientError> {
-                match (acc, row?) {
-                    (None, rhs) => Ok(Some(Some(rhs))),
-                    // If there was more than one row, then due to the uniqueness
-                    // constraints on the `tx_locator_map` table, all of the rows conflict
-                    // with the locator being inserted.
-                    (Some(_), _) => Ok(Some(None)),
-                }
-            })?;
-
-        match locator {
-            // If the locator in the table matches the one being inserted, do nothing.
-            Some(Some(loc)) if loc == (block_height, *tx_index, *txid) => (),
-            // If the locator being inserted would conflict, report it.
-            Some(_) => Err(SqliteClientError::DbError(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
-                Some("UNIQUE constraint failed: tx_locator_map.block_height, tx_locator_map.tx_index".into()),
-            )))?,
-            // If the locator doesn't exist, insert it.
-            None => stmt_insert_tx_locator.execute(tx_args).map(|_| ())?,
-        }
+        ensure_tx_locator(conn, block_height, *tx_index, *txid)?;
 
         for nf in nullifiers {
             // Here it is okay to use an upsert, because per above we've confirmed that
@@ -5795,6 +5892,114 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
     }
 
     Ok(())
+}
+
+/// Inserts the given entries into the transparent spend locator map.
+///
+/// Each entry records that the transaction at the given locator spends the listed outpoints, so
+/// that the spend can be recognized if the wallet later discovers that it holds one of the
+/// outputs. This is the transparent counterpart of [`insert_nullifier_map`].
+///
+/// Returns an error if the new entries conflict with existing ones. This indicates either
+/// corrupted data, or that a reorg has occurred and the caller needs to repair the wallet
+/// state with [`truncate_to_height`].
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn insert_transparent_spend_locator_map(
+    conn: &rusqlite::Transaction<'_>,
+    block_height: BlockHeight,
+    new_entries: &[(TxIndex, TxId, Vec<OutPoint>)],
+) -> Result<(), SqliteClientError> {
+    let mut stmt_insert_spend_mapping = conn.prepare_cached(
+        "INSERT INTO transparent_spend_locator_map
+        (prevout_txid, prevout_output_index, block_height, tx_index)
+        VALUES (:prevout_txid, :prevout_output_index, :block_height, :tx_index)
+        ON CONFLICT (prevout_txid, prevout_output_index) DO UPDATE
+        SET block_height = :block_height,
+            tx_index = :tx_index",
+    )?;
+
+    for (tx_index, txid, prevouts) in new_entries {
+        if prevouts.is_empty() {
+            continue;
+        }
+
+        ensure_tx_locator(conn, block_height, *tx_index, *txid)?;
+
+        for prevout in prevouts {
+            // As in `insert_nullifier_map`, an upsert is safe here because the locator has been
+            // confirmed to point at the same transaction.
+            stmt_insert_spend_mapping.execute(named_params![
+                ":prevout_txid": prevout.hash(),
+                ":prevout_output_index": prevout.n(),
+                ":block_height": u32::from(block_height),
+                ":tx_index": u16::from(*tx_index),
+            ])?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns the row of the `transactions` table corresponding to the transaction that spends the
+/// given outpoint, if one was observed while scanning before the wallet knew it held the output.
+///
+/// This is the transparent counterpart of [`query_nullifier_map`]. As there, the `transactions`
+/// row is created lazily: the spending transaction is recorded in the map by locator alone, and
+/// only becomes a transaction the wallet stores once one of its inputs is found to spend a wallet
+/// output.
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn query_transparent_spend_locator_map(
+    conn: &rusqlite::Transaction<'_>,
+    outpoint: &OutPoint,
+) -> Result<Option<TxRef>, SqliteClientError> {
+    let locator = conn
+        .query_row(
+            "SELECT block_height, tx_index, txid
+            FROM transparent_spend_locator_map
+            LEFT JOIN tx_locator_map USING (block_height, tx_index)
+            WHERE prevout_txid = :prevout_txid
+            AND prevout_output_index = :prevout_output_index",
+            named_params![
+                ":prevout_txid": outpoint.hash(),
+                ":prevout_output_index": outpoint.n(),
+            ],
+            |row| {
+                Ok((
+                    BlockHeight::from_u32(row.get(0)?),
+                    TxIndex::from(row.get::<_, u16>(1)?),
+                    TxId::from_bytes(row.get(2)?),
+                ))
+            },
+        )
+        .optional()?;
+
+    let Some((height, index, txid)) = locator else {
+        return Ok(None);
+    };
+
+    put_tx_meta(
+        conn,
+        &WalletTx::new(
+            txid,
+            index,
+            vec![],
+            vec![],
+            #[cfg(feature = "transparent-inputs")]
+            vec![],
+            vec![],
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
+        height,
+    )
+    .map(Some)
 }
 
 /// Returns the row of the `transactions` table corresponding to the transaction in which
@@ -5842,6 +6047,9 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
             index,
             vec![],
             vec![],
+            #[cfg(feature = "transparent-inputs")]
+            vec![],
+            vec![],
             vec![],
             #[cfg(feature = "orchard")]
             vec![],
@@ -5857,9 +6065,12 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     .map(Some)
 }
 
-/// Deletes from the nullifier map any entries with a locator referencing a block height
-/// lower than the pruning height.
-pub(crate) fn prune_nullifier_map(
+/// Deletes from the nullifier and transparent spend maps any entries with a locator
+/// referencing a block height lower than the pruning height.
+///
+/// Both maps key their entries by a `tx_locator_map` row, so deleting the locators removes
+/// the entries of both by cascade.
+pub(crate) fn prune_spend_maps(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {

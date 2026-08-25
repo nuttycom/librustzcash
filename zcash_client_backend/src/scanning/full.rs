@@ -18,7 +18,15 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade, TxIndex},
 };
 
-use super::{Nullifiers, PositionTracker, ScanError, ScanningKeys, find_received, find_spent};
+use super::{
+    PositionTracker, ScanError, ScanningKeys, SpendIdentifiers, find_received, find_spent,
+};
+
+#[cfg(feature = "transparent-inputs")]
+use super::find_transparent_spends;
+
+#[doc(inline)]
+pub use super::ScanBlockError;
 use crate::{
     data_api::{
         BlockMetadata, ScannedBlock, ScannedBundles, ll::wallet::detect_wallet_transparent_outputs,
@@ -37,7 +45,10 @@ use super::IronwoodDomain;
 use std::marker::PhantomData;
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::{address::TransparentAddress, keys::TransparentKeyScope};
+use {
+    crate::wallet::transparent_address_observations,
+    transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+};
 
 /// The default number of outputs at which a batch runner immediately flushes a batch.
 pub(crate) const DEFAULT_BATCH_SIZE_THRESHOLD: usize = 200;
@@ -364,44 +375,6 @@ where
     (header, vtx)
 }
 
-/// Errors that can occur while scanning a full block via [`scan_block`].
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum ScanBlockError<E> {
-    /// A structural or continuity error in the block being scanned.
-    Scan(ScanError),
-    /// An error occurred while looking up the wallet account associated with a
-    /// transparent address.
-    AddressLookup(E),
-}
-
-impl<E> From<ScanError> for ScanBlockError<E> {
-    fn from(e: ScanError) -> Self {
-        ScanBlockError::Scan(e)
-    }
-}
-
-impl<E: fmt::Display> fmt::Display for ScanBlockError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ScanBlockError::Scan(e) => write!(f, "Error scanning block: {e}"),
-            ScanBlockError::AddressLookup(e) => write!(
-                f,
-                "Error looking up the wallet account for a transparent address: {e}"
-            ),
-        }
-    }
-}
-
-impl<E: std::error::Error + 'static> std::error::Error for ScanBlockError<E> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ScanBlockError::Scan(e) => Some(e),
-            ScanBlockError::AddressLookup(e) => Some(e),
-        }
-    }
-}
-
 /// Scans a block with a set of [`ScanningKeys`].
 ///
 /// Returns a [`ScannedBlock`] containing one [`WalletTx`] for each transaction in the
@@ -428,7 +401,7 @@ pub fn scan_block<P, AccountId, IvkTag, E>(
     header: &BlockHeader,
     vtx: Vec<BatchResult<IvkTag>>,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
-    nullifiers: &Nullifiers<AccountId>,
+    nullifiers: &SpendIdentifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
     #[cfg(feature = "transparent-inputs")] find_account_for_address: impl Fn(
         &TransparentAddress,
@@ -495,6 +468,9 @@ where
     #[cfg(feature = "orchard")]
     let mut ironwood_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
+    #[cfg(feature = "transparent-inputs")]
+    let mut transparent_spend_map = Vec::with_capacity(vtx.len());
+
     for (tx_index, batch) in vtx.into_iter().enumerate() {
         let BatchResult {
             tx,
@@ -556,8 +532,30 @@ where
             ironwood_spends
         };
 
+        // Detect spends of transparent outputs the wallet is tracking. A coinbase transaction's
+        // single input spends the null outpoint rather than a real prior output, so it is
+        // excluded: it can match no wallet output, and recording it would collide with the
+        // corresponding input of every other block's coinbase.
+        #[cfg(feature = "transparent-inputs")]
+        let (transparent_spends, unlinked_prevouts) = tx
+            .transparent_bundle()
+            .filter(|bundle| !bundle.is_coinbase())
+            .map(|bundle| {
+                find_transparent_spends(
+                    bundle.vin.iter().map(|txin| txin.prevout().clone()),
+                    nullifiers.transparent(),
+                )
+            })
+            .unwrap_or_default();
+
+        #[cfg(feature = "transparent-inputs")]
+        transparent_spend_map.push((tx_index, txid, unlinked_prevouts));
+
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account_id());
+        #[cfg(feature = "transparent-inputs")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(transparent_spends.iter().map(|spend| spend.account_id()));
         #[cfg(feature = "orchard")]
         let spent_from_accounts =
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
@@ -579,9 +577,6 @@ where
             )
         }
 
-        // TODO: Transparent spend detection for full blocks is not yet implemented; only
-        // received transparent outputs are scanned here.
-        // https://github.com/zcash/librustzcash/issues/2395
         let transparent_outputs = detect_wallet_transparent_outputs(
             params,
             &tx,
@@ -591,6 +586,10 @@ where
             &find_account_for_address,
         )
         .map_err(ScanBlockError::AddressLookup)?;
+
+        #[cfg(feature = "transparent-inputs")]
+        let has_transparent = !(transparent_spends.is_empty() && transparent_outputs.is_empty());
+        #[cfg(not(feature = "transparent-inputs"))]
         let has_transparent = !transparent_outputs.is_empty();
 
         let (sapling_outputs, mut sapling_nc) = tx
@@ -684,7 +683,21 @@ where
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                #[cfg(feature = "transparent-inputs")]
+                transparent_spends,
+                #[cfg(not(feature = "transparent-inputs"))]
+                vec![],
                 transparent_outputs,
+                // A full block carries complete transaction data, so both involvement
+                // directions are observable: the addresses paid by the outputs, and the
+                // addresses the inputs' `scriptSig`s reveal. Addresses the wallet does not
+                // control are recorded too, since a transaction that involves the wallet may
+                // name an address it learns to control only later. Every input of every other
+                // transaction in the block would have to be hashed to derive observations that
+                // are then discarded, so this is computed only once the transaction is known to
+                // involve the wallet.
+                #[cfg(feature = "transparent-inputs")]
+                transparent_address_observations(&tx),
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]
@@ -725,6 +738,8 @@ where
             ironwood_note_commitments,
             ironwood_nullifier_map,
         ),
+        #[cfg(feature = "transparent-inputs")]
+        transparent_spend_map,
     ))
 }
 
@@ -951,6 +966,134 @@ mod tests {
 
     use super::{PositionTracker, tree_sizes_around};
     use crate::scanning::ScanError;
+
+    /// Scanning a full block records, for each transaction the wallet is involved in, the
+    /// transparent addresses that transaction's data names — in both directions, since a full
+    /// block carries the `scriptSig`s that an input reveals its address through.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn scan_block_records_transparent_address_observations() {
+        use std::convert::Infallible;
+
+        use nonempty::NonEmpty;
+        use transparent::{
+            address::{Script, TransparentAddress},
+            bundle::{Authorized as TransparentAuthorized, Bundle, OutPoint, TxIn, TxOut},
+            keys::TransparentKeyScope,
+        };
+        use zcash_primitives::{
+            block::{Block, BlockHash, BlockHeaderData},
+            transaction::{Authorized, TransactionData, TxVersion},
+        };
+        use zcash_protocol::{
+            consensus::{BranchId, MAIN_NETWORK},
+            value::Zatoshis,
+        };
+        use zcash_script::script;
+
+        use crate::{
+            data_api::BlockMetadata,
+            scanning::{
+                ScanningKeys, SpendIdentifiers,
+                full::{decrypt_block, scan_block},
+            },
+            wallet::TransparentInvolvement,
+        };
+
+        // A compressed public key encoding, and a P2PKH `scriptSig` revealing it.
+        let mut pubkey = vec![0x02];
+        pubkey.extend_from_slice(&[0x11; 32]);
+        let mut script_sig = vec![71];
+        script_sig.extend_from_slice(&[0x30; 71]);
+        script_sig.push(u8::try_from(pubkey.len()).unwrap());
+        script_sig.extend_from_slice(&pubkey);
+
+        let recipient = TransparentAddress::PublicKeyHash([0x22; 20]);
+        let prevout = OutPoint::new([0x33; 32], 7);
+        let tx = TransactionData::<Authorized>::from_parts(
+            TxVersion::V5,
+            BranchId::Nu5,
+            0,
+            BlockHeight::from(0),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
+            Some(Bundle::<TransparentAuthorized> {
+                vin: vec![TxIn::from_parts(
+                    prevout.clone(),
+                    Script(script::Code(script_sig)),
+                    0,
+                )],
+                vout: vec![TxOut::new(
+                    Zatoshis::const_from_u64(100_000),
+                    Script::from(&recipient.script()),
+                )],
+                authorization: TransparentAuthorized,
+            }),
+            None,
+            None,
+            None,
+        )
+        .freeze()
+        .expect("transaction data is complete");
+
+        let height = BlockHeight::from(1_000_000);
+        let header = BlockHeaderData {
+            version: 4,
+            prev_block: BlockHash([0; 32]),
+            merkle_root: [0; 32],
+            final_sapling_root: [0; 32],
+            time: 0,
+            bits: 0,
+            nonce: [0; 32],
+            solution: vec![],
+        }
+        .freeze()
+        .unwrap();
+        let block = Block::from_parts(header, NonEmpty::singleton(tx), height);
+
+        let scanning_keys = ScanningKeys::<u32, ()>::empty();
+        let (header, vtx) = decrypt_block(&MAIN_NETWORK, block, &scanning_keys);
+        let scanned = scan_block(
+            &MAIN_NETWORK,
+            height,
+            &header,
+            vtx,
+            &scanning_keys,
+            &SpendIdentifiers::empty(),
+            Some(&BlockMetadata::from_parts(
+                height - 1,
+                BlockHash([0; 32]),
+                Some(0),
+                #[cfg(feature = "orchard")]
+                Some(0),
+                #[cfg(feature = "orchard")]
+                Some(0),
+            )),
+            // The output's recipient is treated as a wallet address, which is what makes the
+            // transaction wallet-involving and so eligible to be observed at all.
+            |addr| {
+                Ok::<_, Infallible>(
+                    (*addr == recipient).then_some((0u32, Some(TransparentKeyScope::EXTERNAL))),
+                )
+            },
+        )
+        .expect("scanning the block succeeds");
+
+        assert_eq!(scanned.transactions().len(), 1);
+        let observations = scanned.transactions()[0].transparent_address_observations();
+
+        // Both directions are observable from complete transaction data.
+        assert_eq!(observations.len(), 2);
+        assert_eq!(observations[0].address(), &recipient);
+        assert_eq!(
+            observations[0].involvement(),
+            &TransparentInvolvement::Output(Zatoshis::const_from_u64(100_000))
+        );
+        assert_eq!(
+            observations[1].involvement(),
+            &TransparentInvolvement::Input(prevout)
+        );
+    }
 
     // The behaviour of `tree_sizes_around` is independent of the shielded protocol (the
     // protocol is only echoed back in errors), so these properties are checked for a
