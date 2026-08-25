@@ -81,6 +81,17 @@ workspace.
   recorded birthday note commitment tree sizes, and queues the widened range
   (from Sapling activation upward) for scanning at `ScanPriority::Historic`,
   re-queueing any part of it that had already been scanned.
+- When a spend of a wallet transparent output is linked to a transaction the
+  wallet already stores, each transparent output of that transaction now
+  receives a record of the account that funded it and the recipient it paid:
+  `v_tx_outputs` reports a `from_account_uuid` for it, and `v_received_outputs`
+  reports a `sent_note_id`. Such a record was previously written only when the
+  funding account was known at the moment the transaction was stored. Outputs
+  that already carry a recorded recipient are left unchanged.
+- A migration writes the funding-account record for every stored transaction an
+  existing wallet already treats as spending one of its transparent outputs. On
+  a wallet upgraded before that record existed, those transactions' outputs are
+  no longer reported as receipts from an unknown sender.
 
 ## [0.22.0] - 2026-08-18
 
