@@ -16,6 +16,7 @@ workspace.
   `unstable` feature)
 - `zcash_keys::keys::testing::arb_partial_unified_spending_key` (under the
   `test-dependencies` feature)
+- `zcash_keys::keys::transparent::gap_limits::ReconcileOutcome`
 
 ### Changed
 - `zcash_keys::keys::UnifiedSpendingKey` may now hold keys for any non-empty
@@ -30,6 +31,11 @@ workspace.
     present, and `UnifiedSpendingKey::from_bytes` accepts an encoding with any
     non-empty subset of the components. `from_bytes` now reads the entire
     input, and returns an error for trailing data or a repeated typecode.
+- `zcash_keys::keys::transparent::gap_limits::AddressStore` has a new required
+  method, `reconcile_stored_addresses`, which has no default implementation.
+- `zcash_keys::keys::transparent::gap_limits::generate_gap_addresses` derives
+  successive windows of addresses until a window reconciles without moving the
+  account's gap, rather than deriving a single window.
 
 ## [0.17.0-keystone.0] - 2026-11-10
 

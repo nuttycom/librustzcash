@@ -22,6 +22,9 @@ workspace.
 - `WalletDb` implements the storage-trait method newly added to
   `zcash_client_backend` behind `transparent-inputs`,
   `ll::LowLevelWalletWrite::put_transparent_address_observations`.
+- `WalletDb` implements the method newly required of
+  `zcash_keys::keys::transparent::gap_limits::AddressStore`,
+  `reconcile_stored_addresses` (behind `transparent-inputs`).
 
 ### Changed
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
@@ -96,6 +99,17 @@ workspace.
   returns the account that controls the P2PKH address with the same public key
   hash as a given TEX address. Previously it returned `Ok(None)` for every TEX
   address. No change is needed at call sites.
+- A transaction the wallet stores that names a transparent address the wallet
+  did not control at the time is recognized when an address covering it is
+  added afterwards, by account creation or import, by
+  `WalletWrite::import_standalone_transparent_{address, pubkey, pubkeys,
+  script}`, or by gap-limit advancement. Recognition records the received
+  output and any spend of it, marks the address used and advances the gap,
+  watches the output for a spend, requests the transactions that funded the
+  containing transaction, and sets the fee of any transaction whose fee the
+  recovered output completes. A transaction that only spends from the wallet is
+  recognized through the address its `scriptSig` reveals. The migration that
+  adds the index applies this to a wallet's entire stored history.
 
 ## [0.23.0] - 2026-10-21
 
