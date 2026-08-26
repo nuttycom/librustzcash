@@ -79,7 +79,7 @@ workspace.
   previously reported its shielded output — the principal one — with a NULL
   `from_account_uuid` and a NULL `sent_note_id`. An output no held key can
   decrypt still records nothing, as it does when the transaction is first
-  stored.
+  stored. A further migration applies this to existing wallets.
 
 ## [0.22.0] - 2026-08-18
 

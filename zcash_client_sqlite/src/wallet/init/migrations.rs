@@ -150,6 +150,7 @@ migration_modules!(
     orchard_shardtree,
     received_notes_nullable_nf,
     receiving_key_scopes,
+    repair_shielded_funding_attribution,
     sapling_memo_consistency,
     sent_notes_to_internal,
     shardtree_support,
@@ -409,6 +410,9 @@ pub(super) fn all_migrations<
             _params: params.clone(),
         }),
         Box::new(fix_transparent_funding_attribution::Migration {
+            _params: params.clone(),
+        }),
+        Box::new(repair_shielded_funding_attribution::Migration {
             _params: params.clone(),
         }),
     ]
