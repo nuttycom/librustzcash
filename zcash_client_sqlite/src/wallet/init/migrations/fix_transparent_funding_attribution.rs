@@ -23,7 +23,7 @@ use super::transparent_tx_address_observations;
 use crate::wallet::init::WalletMigrationError;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::wallet::transparent::observations;
+use crate::wallet::attribution::{self, RepairScope};
 
 /// Records the account that funded each transparent output of a stored transaction whose spend
 /// of a wallet output was linked after that transaction was stored.
@@ -56,7 +56,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn up(&self, _transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        observations::repair_funding_attribution(_transaction, &self._params)?;
+        attribution::repair_funding_attribution(
+            _transaction,
+            &self._params,
+            RepairScope::TransparentSpends,
+        )?;
 
         Ok(())
     }

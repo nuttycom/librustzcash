@@ -80,6 +80,14 @@ workspace.
   `from_account_uuid` and a NULL `sent_note_id`. An output no held key can
   decrypt still records nothing, as it does when the transaction is first
   stored. A further migration applies this to existing wallets.
+- Linking a spend of a wallet shielded note to a transaction the wallet already
+  stores now writes the funding-account record too. Only transparent spends
+  triggered it before. A transaction funded from a shielded note — Sapling,
+  Orchard or Ironwood — whose nullifier was linked after its data was stored
+  therefore reported a NULL `from_account_uuid` for the payment it made to
+  another account of the same wallet, while its change carried one. A migration
+  applies this to existing wallets, selecting by a spend recorded in any pool
+  rather than by a transparent spend alone.
 
 ## [0.22.0] - 2026-08-18
 

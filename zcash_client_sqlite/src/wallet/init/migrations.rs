@@ -151,6 +151,7 @@ migration_modules!(
     received_notes_nullable_nf,
     receiving_key_scopes,
     repair_shielded_funding_attribution,
+    repair_shielded_spend_attribution,
     sapling_memo_consistency,
     sent_notes_to_internal,
     shardtree_support,
@@ -415,7 +416,21 @@ pub(super) fn all_migrations<
         Box::new(repair_shielded_funding_attribution::Migration {
             _params: params.clone(),
         }),
+        Box::new(repair_shielded_spend_attribution::Migration {
+            params: params.clone(),
+        }),
     ]
+}
+
+/// Constructs the pool-complete attribution repair, for tests that drive it directly.
+#[cfg(test)]
+pub(crate) fn repair_shielded_spend_attribution_migration<P>(
+    params: P,
+) -> impl RusqliteMigration<Error = WalletMigrationError>
+where
+    P: consensus::Parameters,
+{
+    repair_shielded_spend_attribution::Migration { params }
 }
 
 /// All states of the migration DAG that have been exposed in a public crate release, in
