@@ -49,6 +49,8 @@ workspace.
   behind `transparent-inputs`, `get_unspent_transparent_outpoints` and
   `find_account_for_transparent_address`. Both are called on the scan path, so
   they are required rather than defaulted to a panic.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method,
+  `queue_rescan`, which queues a range of block heights to be scanned again.
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
   method behind `transparent-inputs`, `track_block_transparent_spends`, and
   `prune_tracked_nullifiers` is renamed to `prune_tracked_spends`: it now prunes
