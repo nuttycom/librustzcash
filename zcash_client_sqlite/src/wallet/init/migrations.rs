@@ -131,6 +131,7 @@ migration_modules!(
     fix_transparent_funding_attribution,
     fix_transparent_received_outputs,
     fix_v_transactions_expired_unmined,
+    fix_v_transactions_multi_account_totals,
     full_account_ids,
     initial_setup,
     ironwood_pool_code_views,
@@ -419,6 +420,7 @@ pub(super) fn all_migrations<
         Box::new(repair_shielded_spend_attribution::Migration {
             params: params.clone(),
         }),
+        Box::new(fix_v_transactions_multi_account_totals::Migration),
     ]
 }
 
