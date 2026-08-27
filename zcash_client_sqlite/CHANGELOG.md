@@ -20,6 +20,8 @@ workspace.
   which records every transparent address named by a wallet-involved
   transaction, in both involvement directions, and populates it from every
   transaction for which complete data is already stored.
+- `WalletDb` implements
+  `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
