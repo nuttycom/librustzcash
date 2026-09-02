@@ -100,6 +100,12 @@ workspace.
   method behind `transparent-inputs`, `track_block_transparent_spends`, and
   `prune_tracked_nullifiers` is renamed to `prune_tracked_spends`: it now prunes
   the transparent spend map alongside the nullifier maps.
+- `zcash_client_backend::tor::http::Client::http_get_json` takes an additional
+  `request: impl Fn(Builder) -> Builder` argument, positioned after `url` as in
+  `Client::http_get`, for setting request headers such as `User-Agent`.
+  `Accept: application/json` is applied only if the closure did not set
+  `Accept`, so a closure that sets it overrides the default. Pass `|b| b` to
+  preserve the previous behaviour.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
@@ -129,6 +135,11 @@ workspace.
   server is not yet wired up: `zcash_client_backend::sync` still requests only
   shielded data, so a caller must set `BlockRange.poolTypes` itself to receive
   it.
+- `zcash_client_backend::tor::http::Client::{http_get, http_post}`, and
+  therefore `Client::http_get_json`, now always send the `Host` header derived
+  from the request URL. A `Host` set by the request-construction closure was
+  previously serialized onto the wire alongside it and took precedence for
+  `HeaderMap::get`; it is now discarded.
 
 ## [0.24.0] - 2026-08-18
 
