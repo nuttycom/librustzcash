@@ -106,6 +106,8 @@ workspace.
   `Accept: application/json` is applied only if the closure did not set
   `Accept`, so a closure that sets it overrides the default. Pass `|b| b` to
   preserve the previous behaviour.
+- `zcash_client_backend::data_api::WalletWrite` has a new required method,
+  `queue_rescan`, which queues a range of block heights to be scanned again.
 
 ### Fixed
 - `zcash_client_backend::data_api::WalletWrite::put_blocks` now records the
