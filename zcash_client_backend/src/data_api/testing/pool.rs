@@ -13,7 +13,10 @@ use secrecy::Secret;
 use shardtree::error::ShardTreeError;
 
 use transparent::address::TransparentAddress;
-use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
+use zcash_keys::{
+    address::{Address, UnifiedAddress},
+    keys::{UnifiedAddressRequest, UnifiedSpendingKey},
+};
 use zcash_primitives::{
     block::BlockHash,
     transaction::{
@@ -38,7 +41,7 @@ use crate::{
         WalletSummary, WalletTest, WalletWrite,
         anchor_retention::AnchorRetentionInterval,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
-        error::Error,
+        error::{AddressExpiryError, Error},
         testing::{
             AddressType, CacheInsertionResult, FakeCompactOutput, InitialChainState, TestBuilder,
             single_output_change_strategy,
@@ -87,7 +90,7 @@ use {
 #[cfg(not(feature = "orchard"))]
 use zcash_address::{
     ZcashAddress,
-    unified::{self, Encoding as _, Receiver},
+    unified::{self, Encoding as _, Receiver, Revision, Uitem},
 };
 
 // `ProposalError` also reaches this module through the `transparent-inputs` group below,
@@ -109,7 +112,7 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+    zcash_keys::keys::transparent::gap_limits::GapLimits,
     zcash_primitives::transaction::{
         builder::DEFAULT_TX_EXPIRY_DELTA,
         fees::{FeeRule, transparent::InputSize, zip317},
@@ -1260,10 +1263,13 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
         Address::Sapling(addr) => addr.to_bytes(),
         _ => panic!("expected a Sapling address"),
     };
-    let ua = unified::Address::try_from_items(vec![
-        Receiver::Sapling(sapling_receiver),
-        Receiver::Orchard([0xab; 43]),
-    ])
+    let ua = unified::Address::try_from_items(
+        Revision::R0,
+        vec![
+            Uitem::Data(Receiver::Sapling(sapling_receiver)),
+            Uitem::Data(Receiver::Orchard([0xab; 43])),
+        ],
+    )
     .unwrap();
     let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
 
@@ -1317,7 +1323,11 @@ pub fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>(
 
     // Without the `orchard` feature, the Orchard receiver's contents are not parsed,
     // so arbitrary receiver bytes suffice.
-    let ua = unified::Address::try_from_items(vec![Receiver::Orchard([0xab; 43])]).unwrap();
+    let ua = unified::Address::try_from_items(
+        Revision::R0,
+        vec![Uitem::Data(Receiver::Orchard([0xab; 43]))],
+    )
+    .unwrap();
     let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -9822,5 +9832,140 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
     assert!(
         step.is_canonical_crossing(&zip318, canonical_fee),
         "the second crossing must still be canonical"
+    );
+}
+
+/// Tests that payment construction enforces the ZIP 316 Revision 2 address expiration
+/// rules: a payment to an address whose expiry height conflicts with the transaction's
+/// expiry height is refused, a payment to an address whose expiry time has passed is
+/// refused (for any recipient of a multi-recipient transaction), and a payment to an
+/// address with unexpired metadata succeeds.
+pub fn create_to_address_respects_recipient_expiry<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(100_000));
+
+    let account = st.test_account().cloned().unwrap();
+    let birthday = account.birthday().height();
+
+    // Construct recipient addresses carrying expiry metadata from the account's own
+    // default address, so that every receiver is valid for the active pool set.
+    let (default_addr, _) = account
+        .usk()
+        .to_unified_full_viewing_key()
+        .default_address(UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap();
+    let with_expiry = |expiry_height: Option<BlockHeight>, expiry_time: Option<u64>| {
+        UnifiedAddress::from_receivers(
+            #[cfg(feature = "orchard")]
+            default_addr.orchard().copied(),
+            default_addr.sapling().copied(),
+            default_addr.transparent().copied(),
+            expiry_height,
+            expiry_time,
+        )
+        .expect("the default address has at least one receiver")
+    };
+
+    let payment_value = Zatoshis::const_from_u64(20_000);
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+
+    // An expiry height in the past conflicts with the transaction's expiry height.
+    let expired_by_height = with_expiry(Some(birthday), None);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        Address::from(expired_by_height.clone()).to_zcash_address(st.network()),
+        payment_value,
+    )])
+    .unwrap();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal
+        ),
+        Err(Error::RecipientAddressExpiry {
+            payment_index: 0,
+            error: AddressExpiryError::ExpiryHeightConflict { .. },
+        })
+    );
+
+    // An expiry time before the current time makes the address expired; the constraint
+    // applies to every recipient of a multi-recipient transaction.
+    /// One second past the Unix epoch, long before the test clock's current time.
+    const EXPIRY_TIME_IN_PAST: u64 = 1;
+    let valid_far_future = with_expiry(
+        Some(birthday + 10_000),
+        Some(super::TEST_CLOCK_EPOCH_OFFSET.as_secs() + 10_000),
+    );
+    let expired_by_time = with_expiry(None, Some(EXPIRY_TIME_IN_PAST));
+    let request = zip321::TransactionRequest::new(vec![
+        Payment::without_memo(
+            Address::from(valid_far_future.clone()).to_zcash_address(st.network()),
+            payment_value,
+        ),
+        Payment::without_memo(
+            Address::from(expired_by_time.clone()).to_zcash_address(st.network()),
+            payment_value,
+        ),
+    ])
+    .unwrap();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal
+        ),
+        Err(Error::RecipientAddressExpiry {
+            payment_index: 1,
+            error: AddressExpiryError::Expired { .. },
+        })
+    );
+
+    // A payment to an address with unexpired metadata succeeds.
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        Address::from(valid_far_future.clone()).to_zcash_address(st.network()),
+        payment_value,
+    )])
+    .unwrap();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal
+        ),
+        Ok(_)
     );
 }

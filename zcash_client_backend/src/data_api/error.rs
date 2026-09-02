@@ -123,6 +123,14 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// Pass `None` to accept the canonical expiry.
     ExpiryHeightConflictsWithCanonicalCrossing { requested: BlockHeight },
 
+    /// A ZIP 316 Revision 2 recipient address of the payment at the given index has
+    /// expired, or has expiry metadata that conflicts with the transaction's expiry
+    /// height. A currently-valid address should be obtained for the intended recipient.
+    RecipientAddressExpiry {
+        payment_index: usize,
+        error: AddressExpiryError,
+    },
+
     /// An error occurred while working with PCZTs.
     #[cfg(feature = "pczt")]
     Pczt(PcztError),
@@ -213,6 +221,57 @@ pub enum PcztError {
     /// PCZT parsing resulted in an invalid condition.
     Invalid(String),
 }
+
+/// The ways in which a ZIP 316 Revision 2 recipient address's expiry metadata can
+/// prevent a payment from being constructed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AddressExpiryError {
+    /// The address's expiry time is earlier than the current time.
+    Expired {
+        /// The address's expiry time, in seconds since the Unix epoch.
+        expiry_time: u64,
+    },
+    /// The transaction's expiry height would exceed the address's expiry height.
+    ///
+    /// ZIP 316 forbids sending in this case rather than lowering the transaction's
+    /// expiry height to match, since an expiry height derived from the address's
+    /// metadata would leak information about the destination on chain.
+    ExpiryHeightConflict {
+        address_expiry: BlockHeight,
+        transaction_expiry: BlockHeight,
+    },
+    /// The address defines an expiry height, which requires the transaction to carry a
+    /// nonzero expiry height, but transaction expiry was disabled.
+    TransactionExpiryDisabled { address_expiry: BlockHeight },
+}
+
+impl fmt::Display for AddressExpiryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AddressExpiryError::Expired { expiry_time } => write!(
+                f,
+                "the address expired at {expiry_time} (seconds since the Unix epoch)"
+            ),
+            AddressExpiryError::ExpiryHeightConflict {
+                address_expiry,
+                transaction_expiry,
+            } => write!(
+                f,
+                "the transaction would expire at height {transaction_expiry}, after the \
+                 address's expiry height {address_expiry}"
+            ),
+            AddressExpiryError::TransactionExpiryDisabled { address_expiry } => write!(
+                f,
+                "the address expires at height {address_expiry}, which requires the \
+                 transaction to carry a nonzero expiry height, but transaction expiry \
+                 was disabled"
+            ),
+        }
+    }
+}
+
+impl error::Error for AddressExpiryError {}
 
 impl<DE, TE, SE, FE, CE, N> fmt::Display for Error<DE, TE, SE, FE, CE, N>
 where
@@ -330,6 +389,15 @@ where
                 f,
                 "An expiry height of {requested} was requested for a canonical ZIP 318 crossing, \
                  which takes the ZIP 318 rolling expiry; pass `None` to accept it."
+            ),
+            Error::RecipientAddressExpiry {
+                payment_index,
+                error,
+            } => write!(
+                f,
+                "The recipient address of the payment at index {payment_index} cannot be \
+                 paid: {error}. Try to obtain a currently-valid address for the intended \
+                 recipient."
             ),
             Error::ExpiryHeightBelowTargetHeight {
                 expiry_height,
