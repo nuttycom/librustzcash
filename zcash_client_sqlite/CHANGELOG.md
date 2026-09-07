@@ -37,6 +37,10 @@ workspace.
   Address.
 
 ### Fixed
+- The `v_tx_outputs` view now returns the `diversifier_index_be` column that
+  its documentation and the 0.18.0 changelog describe: the diversifier index
+  of the receiving address as a big-endian BLOB for outputs the wallet
+  received, `NULL` otherwise. The view had dropped the column.
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
   no longer fails with a "Consensus branch ID not known" error. When neither a
