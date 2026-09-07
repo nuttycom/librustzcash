@@ -15,6 +15,12 @@ workspace.
 - `zcash_client_sqlite::WalletDb::anchor_retention`: the anchor-retention policy
   the wallet's `put_blocks` applies, for a store that maintains the wallet's
   note commitment trees by other means.
+- `zcash_client_sqlite::ExtensionReader` and `WalletDb::with_extension_reader`:
+  read-only access to the wallet's public views, `v_transactions` and
+  `v_tx_outputs`, and to `ext_`-prefixed objects. A wallet-owned table or view is
+  readable only as the public views themselves read it; a statement, or an `ext_`
+  view, that reads the internal schema directly fails to prepare with an
+  authorization error.
 
 ### Changed
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
