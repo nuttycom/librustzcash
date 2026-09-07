@@ -17,6 +17,10 @@ workspace.
   previously conflated with `transactions_without_wallet_relevance`.
 
 ### Fixed
+- The `v_tx_outputs` view now returns the `diversifier_index_be` column that
+  its documentation and the 0.18.0 changelog describe: the diversifier index
+  of the receiving address as a big-endian BLOB for outputs the wallet
+  received, `NULL` otherwise. The view had dropped the column.
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
   ran before 2025-09-16 no longer fails with `NOT NULL constraint failed:
   accounts_new.zcashd_legacy_address_index`. In such a database every account

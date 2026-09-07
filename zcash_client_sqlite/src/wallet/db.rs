@@ -1780,6 +1780,7 @@ SELECT
         MAX(CASE WHEN is_sent_row THEN to_address END),
         MAX(CASE WHEN NOT is_sent_row THEN to_address END)
     )                           AS to_address,
+    MAX(diversifier_index_be)   AS diversifier_index_be,
     MAX(value)                  AS value,
     MAX(is_change)              AS is_change,
     MAX(memo)                   AS memo,
