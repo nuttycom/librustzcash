@@ -320,6 +320,12 @@ impl<'a> Borrow<rusqlite::Transaction<'a>> for SqlTransaction<'a> {
 /// by the wallet.
 const EXTENSION_SCHEMA_PREFIX: &str = "ext_";
 
+/// The views that make up the public surface of the `zcash_client_sqlite` schema.
+///
+/// Every other table and view in the schema is an implementation detail, and may change
+/// without a semver-breaking release.
+const PUBLIC_VIEWS: &[&str] = &["v_transactions", "v_tx_outputs"];
+
 /// A restricted statement executor for writing to application-owned extension tables
 /// within a wallet database transaction.
 ///
@@ -449,21 +455,28 @@ impl<'conn> ExtensionTransaction<'conn> {
 /// A handle of this type is provided by [`WalletDb::with_extension_reader`]. It is the
 /// read-side counterpart of [`ExtensionTransaction`]: an application that keeps its own
 /// state in `ext_`-prefixed tables writes them through that type, and reads them — and
-/// the documented views of the wallet schema — through this one, so it never needs the
-/// connection itself.
+/// the wallet's public views — through this one, so it never needs the connection itself.
 ///
 /// # Authorization policy
 ///
 /// Every statement prepared through this type is compiled under a SQLite authorizer that
 /// is installed only for the duration of that compilation. The authorizer:
 ///
-/// - **allows** reads (`SELECT`, reads of individual rows and columns, function calls,
-///   and recursive CTE evaluation) against any table, the wallet's own included; and
-/// - **denies** everything else: `INSERT`, `UPDATE` and `DELETE` against any table, all
-///   schema changes (DDL), `PRAGMA`, `ATTACH`/`DETACH`, and transaction control.
+/// - **allows** reads of the wallet's public views, `v_transactions` and `v_tx_outputs`,
+///   and of objects whose names begin with the `ext_` prefix reserved for external
+///   migrations (see [`WalletMigrator::with_external_migrations`]); and
+/// - **denies** everything else: reads of any other table or view, because the rest of the
+///   schema is not stable API; `INSERT`, `UPDATE` and `DELETE` against any table; all
+///   schema changes (DDL); `PRAGMA`; `ATTACH`/`DETACH`; and transaction control.
+///
+/// A public view reads wallet-owned tables to produce its rows. SQLite reports those reads
+/// as made by the view rather than by the caller, so they are permitted; the name check
+/// applies only to the objects a statement itself names.
 ///
 /// Authorization is decided as a statement is compiled, so a statement the policy denies
 /// fails at [`ExtensionReader::prepare`] rather than when it is later run.
+///
+/// [`WalletMigrator::with_external_migrations`]: crate::wallet::init::WalletMigrator::with_external_migrations
 pub struct ExtensionReader<'conn> {
     conn: &'conn rusqlite::Connection,
 }
@@ -475,10 +488,23 @@ fn extension_reader_authorizer(
     match ctx.action {
         // Reads alone. `Function` and `Recursive` accompany read-only expression and CTE
         // evaluation.
-        AuthAction::Select
-        | AuthAction::Read { .. }
-        | AuthAction::Function { .. }
-        | AuthAction::Recursive => Authorization::Allow,
+        AuthAction::Select | AuthAction::Function { .. } | AuthAction::Recursive => {
+            Authorization::Allow
+        }
+        // Reads are restricted to the wallet's public views and application-owned extension
+        // objects. A read carrying an accessor arises inside the expansion of that view or
+        // trigger, not from the statement being compiled, so the name check applies only to
+        // the objects the statement itself names.
+        AuthAction::Read { table_name, .. } => {
+            if ctx.accessor.is_some()
+                || PUBLIC_VIEWS.contains(&table_name)
+                || table_name.starts_with(EXTENSION_SCHEMA_PREFIX)
+            {
+                Authorization::Allow
+            } else {
+                Authorization::Deny
+            }
+        }
         // Everything else — every write, DDL, PRAGMA, ATTACH/DETACH, transaction control —
         // is denied.
         _ => Authorization::Deny,
@@ -633,9 +659,10 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     ///
     /// The read-side counterpart of [`WalletDb::transactionally_with_extension`]: where
     /// that method lets an application write its `ext_`-prefixed tables atomically with a
-    /// wallet operation, this lets it read them — and the documented views of the wallet
-    /// schema — without holding the connection. See [`ExtensionReader`] for what a
-    /// statement run through the handle may do.
+    /// wallet operation, this lets it read them — and the wallet's public views,
+    /// `v_transactions` and `v_tx_outputs` — without holding the connection. Every other
+    /// table and view is refused, because the rest of the schema is not stable API. See
+    /// [`ExtensionReader`] for the full policy.
     ///
     /// `f` runs inside a deferred transaction that is rolled back when it returns, so
     /// every statement it prepares sees one consistent state of the database.
@@ -4276,7 +4303,7 @@ mod tests {
     }
 
     #[test]
-    fn with_extension_reader_reads_wallet_and_extension_tables() {
+    fn with_extension_reader_reads_public_views_and_extension_tables() {
         let mut st = ext_test_state();
         let account = st.test_account().unwrap().id();
         st.wallet_mut()
@@ -4287,24 +4314,54 @@ mod tests {
             )
             .unwrap();
 
-        let (accounts, notes) = st
+        let (transactions, outputs, notes) = st
             .wallet()
             .db()
             .with_extension_reader::<_, _, rusqlite::Error>(|reader| {
-                let accounts: i64 =
-                    reader.query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))?;
-                let mut stmt = reader.prepare(
-                    "SELECT n.note FROM ext_test_notes n \
-                     JOIN accounts a ON a.uuid = n.account_uuid ORDER BY n.note",
-                )?;
+                // Both public views read wallet-owned tables to produce their rows; those
+                // reads are the views' own, not the caller's.
+                let transactions: i64 =
+                    reader
+                        .query_row("SELECT COUNT(*) FROM v_transactions", [], |row| row.get(0))?;
+                let outputs: i64 =
+                    reader.query_row("SELECT COUNT(*) FROM v_tx_outputs", [], |row| row.get(0))?;
+                let mut stmt = reader.prepare("SELECT note FROM ext_test_notes ORDER BY note")?;
                 let notes = stmt
                     .query_map([], |row| row.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok((accounts, notes))
+                Ok((transactions, outputs, notes))
             })
             .unwrap();
-        assert_eq!(accounts, 1);
+        assert_eq!(transactions, 0);
+        assert_eq!(outputs, 0);
         assert_eq!(notes, vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn with_extension_reader_denies_reads_of_internal_schema() {
+        let mut st = ext_test_state();
+
+        for sql in [
+            "SELECT COUNT(*) FROM accounts",
+            "SELECT COUNT(*) FROM transactions",
+            "SELECT COUNT(*) FROM blocks",
+            "SELECT COUNT(*) FROM v_received_outputs",
+        ] {
+            let result: Result<(), rusqlite::Error> =
+                st.wallet().db().with_extension_reader(|reader| {
+                    reader.prepare(sql)?;
+                    Ok(())
+                });
+            assert_matches!(
+                result,
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::AuthorizationForStatementDenied,
+                "{sql} was not denied"
+            );
+        }
+
+        // The wallet handle remains usable afterwards.
+        assert!(!st.wallet_mut().get_account_ids().unwrap().is_empty());
     }
 
     #[test]
