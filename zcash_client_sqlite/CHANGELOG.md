@@ -19,11 +19,10 @@ workspace.
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
 - `zcash_client_sqlite::ExtensionReader` and `WalletDb::with_extension_reader`:
   read-only access to the wallet's public views, `v_transactions` and
-  `v_tx_outputs`, and to the `ext_`-prefixed tables of an application that keeps
-  its own state in the wallet database; the read-side counterpart of
-  `WalletDb::transactionally_with_extension`. A statement naming any other table
-  or view fails to prepare with an authorization error, the rest of the schema
-  not being stable API.
+  `v_tx_outputs`, and to `ext_`-prefixed objects. A wallet-owned table or view is
+  readable only as the public views themselves read it; a statement, or an `ext_`
+  view, that reads the internal schema directly fails to prepare with an
+  authorization error.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
