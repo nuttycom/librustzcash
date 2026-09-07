@@ -17,6 +17,10 @@ workspace.
   transaction for which complete data is already stored.
 - `WalletDb` implements
   `zcash_client_backend::data_api::WalletWrite::queue_rescan`.
+- `zcash_client_sqlite::ExtensionReader` and `WalletDb::with_extension_reader`:
+  read-only access to the wallet database for an application that keeps its
+  own state in `ext_`-prefixed tables, the read-side counterpart of
+  `WalletDb::transactionally_with_extension`.
 - `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were

@@ -443,6 +443,88 @@ impl<'conn> ExtensionTransaction<'conn> {
     }
 }
 
+/// A restricted statement executor for reading a wallet database on behalf of an
+/// application, without holding the connection.
+///
+/// A handle of this type is provided by [`WalletDb::with_extension_reader`]. It is the
+/// read-side counterpart of [`ExtensionTransaction`]: an application that keeps its own
+/// state in `ext_`-prefixed tables writes them through that type, and reads them — and
+/// the documented views of the wallet schema — through this one, so it never needs the
+/// connection itself.
+///
+/// # Authorization policy
+///
+/// Every statement prepared through this type is compiled under a SQLite authorizer that
+/// is installed only for the duration of that compilation. The authorizer:
+///
+/// - **allows** reads (`SELECT`, reads of individual rows and columns, function calls,
+///   and recursive CTE evaluation) against any table, the wallet's own included; and
+/// - **denies** everything else: `INSERT`, `UPDATE` and `DELETE` against any table, all
+///   schema changes (DDL), `PRAGMA`, `ATTACH`/`DETACH`, and transaction control.
+///
+/// Authorization is decided as a statement is compiled, so a statement the policy denies
+/// fails at [`ExtensionReader::prepare`] rather than when it is later run.
+pub struct ExtensionReader<'conn> {
+    conn: &'conn rusqlite::Connection,
+}
+
+/// The authorizer callback enforcing the [`ExtensionReader`] policy.
+fn extension_reader_authorizer(
+    ctx: rusqlite::hooks::AuthContext<'_>,
+) -> rusqlite::hooks::Authorization {
+    match ctx.action {
+        // Reads alone. `Function` and `Recursive` accompany read-only expression and CTE
+        // evaluation.
+        AuthAction::Select
+        | AuthAction::Read { .. }
+        | AuthAction::Function { .. }
+        | AuthAction::Recursive => Authorization::Allow,
+        // Everything else — every write, DDL, PRAGMA, ATTACH/DETACH, transaction control —
+        // is denied.
+        _ => Authorization::Deny,
+    }
+}
+
+impl<'conn> ExtensionReader<'conn> {
+    /// Runs `f` with the read-only authorizer installed on the connection, removing it
+    /// again (even on error or panic) before returning.
+    fn with_authorizer<T>(
+        &self,
+        f: impl FnOnce() -> Result<T, rusqlite::Error>,
+    ) -> Result<T, rusqlite::Error> {
+        self.conn.authorizer(Some(extension_reader_authorizer));
+        let _guard = AuthorizerGuard { conn: self.conn };
+        f()
+    }
+
+    /// Prepares a read-only SQL statement.
+    ///
+    /// The statement is subject to the authorization policy documented on
+    /// [`ExtensionReader`]; one that would write, or that names a denied action, fails
+    /// here rather than when it is run.
+    pub fn prepare(&self, sql: &str) -> Result<rusqlite::Statement<'conn>, rusqlite::Error> {
+        self.with_authorizer(|| self.conn.prepare(sql))
+    }
+
+    /// Executes a read-only SQL query that is expected to return a single row, and applies
+    /// `f` to that row to produce a result.
+    ///
+    /// The statement is subject to the authorization policy documented on
+    /// [`ExtensionReader`]. As with [`rusqlite::Connection::query_row`], this returns
+    /// [`rusqlite::Error::QueryReturnedNoRows`] if the query selects no rows.
+    pub fn query_row<T, F>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: F,
+    ) -> Result<T, rusqlite::Error>
+    where
+        F: FnOnce(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
+    {
+        self.with_authorizer(|| self.conn.query_row(sql, params, f))
+    }
+}
+
 impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     /// Returns the network parameters that this walletdb instance is bound to.
     pub fn params(&self) -> &P {
@@ -544,6 +626,41 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
             #[cfg(feature = "transparent-inputs")]
             gap_limits: GapLimits::default(),
         }
+    }
+
+    /// Runs `f` with read-only access to the database, for an application that keeps its
+    /// own state beside the wallet's.
+    ///
+    /// The read-side counterpart of [`WalletDb::transactionally_with_extension`]: where
+    /// that method lets an application write its `ext_`-prefixed tables atomically with a
+    /// wallet operation, this lets it read them — and the documented views of the wallet
+    /// schema — without holding the connection. See [`ExtensionReader`] for what a
+    /// statement run through the handle may do.
+    ///
+    /// `f` runs inside a deferred transaction that is rolled back when it returns, so
+    /// every statement it prepares sees one consistent state of the database.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let labels = db_data.with_extension_reader(|reader| {
+    ///     let mut stmt = reader.prepare("SELECT label FROM ext_myapp_accounts")?;
+    ///     let labels = stmt
+    ///         .query_map([], |row| row.get::<_, String>(0))?
+    ///         .collect::<Result<Vec<_>, _>>()?;
+    ///     Ok::<_, rusqlite::Error>(labels)
+    /// })?;
+    /// ```
+    pub fn with_extension_reader<F, A, E: From<rusqlite::Error>>(&self, f: F) -> Result<A, E>
+    where
+        F: FnOnce(&ExtensionReader<'_>) -> Result<A, E>,
+    {
+        let tx = self.conn.borrow().unchecked_transaction()?;
+        let reader = ExtensionReader { conn: &tx };
+        let result = f(&reader)?;
+        // Nothing to commit: the transaction exists only to give the reads one snapshot.
+        tx.rollback()?;
+        Ok(result)
     }
 }
 
@@ -4297,6 +4414,89 @@ mod tests {
 
         // The wallet handle remains usable afterwards.
         assert!(!st.wallet().get_account_ids().unwrap().is_empty());
+    }
+
+    #[test]
+    fn with_extension_reader_reads_wallet_and_extension_tables() {
+        let mut st = ext_test_state();
+        let account = st.test_account().unwrap().id();
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO ext_test_notes (account_uuid, note) VALUES (?1, ?2)",
+                (account.expose_uuid(), "hello"),
+            )
+            .unwrap();
+
+        let (accounts, notes) = st
+            .wallet()
+            .db()
+            .with_extension_reader::<_, _, rusqlite::Error>(|reader| {
+                let accounts: i64 =
+                    reader.query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))?;
+                let mut stmt = reader.prepare(
+                    "SELECT n.note FROM ext_test_notes n \
+                     JOIN accounts a ON a.uuid = n.account_uuid ORDER BY n.note",
+                )?;
+                let notes = stmt
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((accounts, notes))
+            })
+            .unwrap();
+        assert_eq!(accounts, 1);
+        assert_eq!(notes, vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn with_extension_reader_denies_every_write() {
+        let mut st = ext_test_state();
+
+        for sql in [
+            "INSERT INTO ext_test_notes (account_uuid, note) VALUES (x'00', 'no')",
+            "DELETE FROM ext_test_notes",
+            "DELETE FROM accounts",
+            "CREATE TABLE ext_other (x INTEGER)",
+            "PRAGMA user_version = 7",
+            "COMMIT",
+        ] {
+            let result: Result<(), rusqlite::Error> =
+                st.wallet().db().with_extension_reader(|reader| {
+                    reader.prepare(sql)?;
+                    Ok(())
+                });
+            assert!(result.is_err(), "{sql} was not denied");
+        }
+
+        // The denied statements had no effect, and the handle remains usable afterwards.
+        let notes: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM ext_test_notes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(notes, 0);
+        assert!(!st.wallet_mut().get_account_ids().unwrap().is_empty());
+    }
+
+    #[test]
+    fn with_extension_reader_leaves_no_authorizer_behind() {
+        let mut st = ext_test_state();
+        let _: () = st
+            .wallet()
+            .db()
+            .with_extension_reader::<_, _, rusqlite::Error>(|reader| {
+                reader.query_row("SELECT 1", [], |_| Ok(()))
+            })
+            .unwrap();
+
+        // A write through the connection itself succeeds once the closure has returned.
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO ext_test_notes (account_uuid, note) VALUES (x'00', 'after')",
+                [],
+            )
+            .unwrap();
     }
 
     #[test]
