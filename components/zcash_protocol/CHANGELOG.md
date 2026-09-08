@@ -10,10 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-09-04
+
 ### Added
-- Experimental NuTachyon support behind `zcash_unstable="nutachyon"`, including
-  its network upgrade, consensus branch ID, local-consensus activation parameter,
-  and V7 transaction format constants.
+- Experimental NuTachyon support. Every item listed here is available **only**
+  under the `--cfg zcash_unstable="nutachyon"` configuration flag, and is absent
+  from a default build:
+  - `zcash_protocol::constants::{V7_TX_VERSION, V7_VERSION_GROUP_ID}`
+  - `zcash_protocol::consensus::{NetworkUpgrade::NuTachyon, BranchId::NuTachyon}`
+  - `zcash_protocol::local_consensus::LocalNetwork::nu_tachyon`
 
 ## [0.10.5] - 2026-08-18
 
