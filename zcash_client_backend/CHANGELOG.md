@@ -125,6 +125,11 @@ workspace.
 - `zcash_client_backend::wallet::WalletTx::new` takes, behind
   `transparent-inputs`, a `transparent_address_observations` argument after
   `transparent_outputs`.
+- `zcash_client_backend::data_api::ll::wallet::{put_blocks, put_blocks_rows}`
+  take the network parameters as a new second argument, and gain a
+  corresponding `P: consensus::Parameters` type parameter after `DbT`. Pass the
+  parameters your store was constructed with; a call that names the type
+  parameters explicitly gains one (`put_blocks::<_, _, SE, TE>`).
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
