@@ -89,6 +89,9 @@ workspace.
   returns the account that controls the P2PKH address with the same public key
   hash as a given TEX address. Previously it returned `Ok(None)` for every TEX
   address. No change is needed at call sites.
+- `WalletWrite::put_received_transparent_utxo` now queues the transaction that
+  created the output for enhancement, where the wallet does not hold its data,
+  and queues the output for spend detection.
 
 ## [0.23.0] - 2026-10-21
 
