@@ -117,7 +117,10 @@ workspace.
   re-queueing any part of it that had already been scanned or ignored. No
   `ScanPriority::Ignored` range is left between the new birthday and the
   previous one: an ignored range that reaches above the previous birthday is
-  queued in full, so `WalletRead::suggest_scan_ranges` offers all of it.
+  queued in full, so `WalletRead::suggest_scan_ranges` offers all of it. The
+  part of the widened range in the chain-tip pruning window is queued at
+  `ScanPriority::Anchor` instead, so `WalletRead::suggest_scan_ranges` offers
+  it ahead of the rest of the range.
 - When a spend of a wallet transparent output is linked to a transaction the
   wallet already stores, each transparent output of that transaction now
   receives a record of the account that funded it and the recipient it paid:
