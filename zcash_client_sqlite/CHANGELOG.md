@@ -152,6 +152,9 @@ workspace.
   Orchard or Ironwood — whose nullifier was linked after its data was stored
   therefore reported a NULL `from_account_uuid` for the payment it made to
   another account of the same wallet, while its change carried one.
+- `WalletWrite::put_received_transparent_utxo` now queues the transaction that
+  created the output for enhancement, where the wallet does not hold its data,
+  and queues the output for spend detection.
 
 ## [0.23.0] - 2026-10-21
 
