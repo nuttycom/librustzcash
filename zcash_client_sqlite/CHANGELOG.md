@@ -25,6 +25,12 @@ workspace.
 - `WalletDb` implements the method newly required of
   `zcash_keys::keys::transparent::gap_limits::AddressStore`,
   `reconcile_stored_addresses` (behind `transparent-inputs`).
+- `zcash_client_sqlite::ExtensionReader` and `WalletDb::with_extension_reader`:
+  read-only access to the wallet's public views, `v_transactions` and
+  `v_tx_outputs`, and to `ext_`-prefixed objects. A wallet-owned table or view is
+  readable only as the public views themselves read it; a statement, or an `ext_`
+  view, that reads the internal schema directly fails to prepare with an
+  authorization error.
 
 ### Changed
 - `WalletDb`'s `WalletWrite::prune_scan_queue_below` returns
