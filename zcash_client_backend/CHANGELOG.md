@@ -40,6 +40,18 @@ workspace.
   stabilized_note_rewind_un_mines_shard_completion,
   stabilized_note_settled_height_invalidated_by_reorg,
   stabilized_note_spendable_across_small_tip_advance}`
+- `zcash_client_backend::wallet::TransparentAddressObservation` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::TransparentInvolvement` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::transparent_address_observations` (behind
+  `transparent-inputs`)
+- `zcash_client_backend::wallet::WalletTx::transparent_address_observations`
+  (behind `transparent-inputs`)
+- `zcash_client_backend::data_api::ll::wallet::detect_wallet_transparent_outputs`
+- `zcash_client_backend::data_api::ll::wallet::transparent_sent_output_recipient`
+- `zcash_client_backend::data_api::ll::wallet::shielded_sent_output_recipient`
+- `zcash_client_backend::data_api::ll::wallet::SentOutput`
 
 ### Changed
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below` requires
@@ -109,6 +121,27 @@ workspace.
   holds keys for only some protocols. They return
   `Error::KeyNotAvailable` if the proposal spends from, or sends change to, a
   pool for which the spending key holds no key.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has a new required
+  method behind `transparent-inputs`,
+  `put_transparent_address_observations`. Implement it by recording each
+  supplied observation as an idempotent upsert keyed by the transaction, the
+  involvement direction, and the item index.
+- `zcash_client_backend::wallet::WalletTx::new` takes, behind
+  `transparent-inputs`, a `transparent_address_observations` argument after
+  `transparent_outputs`.
+- `zcash_client_backend::data_api::ll::wallet::{put_blocks, put_blocks_rows}`
+  take the network parameters as a new second argument, and gain a
+  corresponding `P: consensus::Parameters` type parameter after `DbT`. Pass the
+  parameters your store was constructed with; a call that names the type
+  parameters explicitly gains one (`put_blocks::<_, _, SE, TE>`).
+- `zcash_client_backend::data_api::ll::wallet::store_decrypted_tx`, built without
+  the `transparent-inputs` feature, now resolves the `recipient_address` of the
+  `Recipient::External` it passes to
+  `LowLevelWalletWrite::put_sent_output` for a transparent output through
+  `LowLevelWalletRead::select_receiving_address`, as it already did with that
+  feature enabled; it previously always used the bare transparent address. A
+  store may therefore record a unified address where it previously recorded a
+  transparent one.
 
 ### Removed
 - `zcash_client_backend::data_api::testing::pool::{stabilized_note_spendable_after_deep_rewind,
